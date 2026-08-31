@@ -1009,7 +1009,7 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected,
 }) {
   const [showHotkeys, setShowHotkeys] = useState(false);
   const [hotkeys, setHotkeys] = useState(loadHotkeys);
@@ -1165,8 +1165,19 @@ function MobileStageView({
   const mainLevel = mainTrackIdx >= 0 ? trackPeaks[mainTrackIdx] : undefined;
   const setPct = stageTotalTime > 0 ? Math.min(100, (stageElapsed / stageTotalTime) * 100) : 0;
 
+  const reaperState = !wsConnected ? "offline" : !reaperConnected ? "warning" : "live";
+  const reaperLabel = !wsConnected ? "OFFLINE" : !reaperConnected ? "REAPER NOT CONNECTED" : "REAPER CONNECTED";
+
   return (
     <div className="mstage">
+      {/* Own full-width row, not a small header badge — this is the one
+          thing everything else on this screen depends on, so it needs to
+          be impossible to miss on a phone. */}
+      <div className={`mstage-reaper-status mstage-reaper-${reaperState}`}>
+        <span className="mstage-reaper-dot" />
+        {reaperLabel}
+      </div>
+
       <div className="mstage-setprog"><div className="mstage-setprog-fill" style={{ width: `${setPct}%` }} /></div>
 
       {(clickLevel !== undefined || mainLevel !== undefined) && (
@@ -3324,6 +3335,7 @@ export default function App() {
           playItem={playItem} clickTrackIdx={clickTrackIdx} mainTrackIdx={mainTrackIdx} trackPeaks={trackPeaks}
           canControl={canControl}
           onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={playNext} onPrev={playPrev}
+          reaperConnected={reaperConnected} wsConnected={wsConnected}
         />
       )}
 

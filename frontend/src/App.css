@@ -1631,6 +1631,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
   min-height: 0;
 }
 
+/* REAPER connection — its own full-width row, not a small header badge.
+   Everything else on this screen depends on it, so it needs to be
+   impossible to miss on a phone. */
+.mstage-reaper-status {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 10px; font-size: 13px; font-weight: 800; letter-spacing: .06em;
+}
+.mstage-reaper-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.mstage-reaper-live    { background: var(--gdim);  color: var(--green); }
+.mstage-reaper-warning { background: rgba(240,192,64,.14); color: var(--yellow); }
+.mstage-reaper-offline { background: var(--adim);  color: var(--accent); }
+
 .mstage-setprog { height: 3px; background: var(--bg3); flex-shrink: 0; }
 .mstage-setprog-fill { height: 100%; background: var(--accent); transition: width .1s linear; }
 
