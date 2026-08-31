@@ -50,13 +50,14 @@ def _load_icon() -> Image.Image:
 
 
 class TrayApp:
-    def __init__(self, get_status_fn, get_clients_fn, get_pairing_fn, get_local_url_fn, get_phrase_fn, set_phrase_fn,
+    def __init__(self, get_status_fn, get_clients_fn, get_pairing_fn, get_local_url_fn, get_update_fn, get_phrase_fn, set_phrase_fn,
                  set_admin_fn, set_transport_control_fn, remove_device_fn, on_quit):
         """
         get_status_fn()  -> {"reaper_connected": bool, "current_project": str|None}
         get_clients_fn() -> [{"label", "device_id", "is_admin", "can_control", "online", "last_seen"}, ...]
         get_pairing_fn() -> {"ok": bool, "payload": {host,port,token}|None, "error": str|None}
         get_local_url_fn() -> str (Plan B — opens the app on this PC via localhost)
+        get_update_fn()  -> {"current_version": str, "update": {"version","url"}|None}
         get_phrase_fn()  -> str (current pairing phrase)
         set_phrase_fn(phrase: str) -> str (normalized phrase actually saved)
         set_admin_fn(device_id: str, is_admin: bool) -- grants/revokes Edit-mode access for this device
@@ -68,6 +69,7 @@ class TrayApp:
         self.get_clients = get_clients_fn
         self.get_pairing = get_pairing_fn
         self.get_local_url = get_local_url_fn
+        self.get_update = get_update_fn
         self.get_phrase = get_phrase_fn
         self.set_phrase = set_phrase_fn
         self.set_admin = set_admin_fn
@@ -152,7 +154,23 @@ class TrayApp:
         status = self.get_status()
         clients = self.get_clients()
         pairing = self.get_pairing()
+        update = self.get_update()
         self._last_clients_key = self._clients_key(clients)
+
+        # Update banner sits above everything else — it's the one thing here
+        # that means "go do something outside this window," so it shouldn't
+        # get buried below the device list.
+        pending = update.get("update")
+        if pending:
+            banner = tk.Frame(win, bg="#2a2410", highlightbackground=ACCENT, highlightthickness=1)
+            banner.pack(fill="x", padx=14, pady=(14, 0))
+            tk.Label(banner, text=f"Update available — {pending['version']}", bg="#2a2410", fg=ACCENT,
+                     font=("Segoe UI", 10, "bold")).pack(pady=(8, 0), padx=10, anchor="w")
+            tk.Label(banner, text=f"You're on {update.get('current_version', '?')}", bg="#2a2410", fg=FG_DIM,
+                     font=("Segoe UI", 8)).pack(padx=10, anchor="w")
+            tk.Button(banner, text="View Release", command=lambda u=pending["url"]: webbrowser.open(u),
+                      bg=BG2, fg=ACCENT, activebackground=BG2, activeforeground=ACCENT,
+                      relief="flat", font=("Segoe UI", 9, "bold")).pack(pady=8, padx=10, fill="x")
 
         tk.Label(win, text="REAPER bridge", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
         connected = status.get("reaper_connected")

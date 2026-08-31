@@ -25,6 +25,8 @@ from typing import List, Optional
 import pairing
 
 PORT = 9760
+APP_VERSION = "1.0.0"
+UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
@@ -794,6 +796,49 @@ def start_discovery_server():
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
 
+# ── Update check ──────────────────────────────────────────────────────────────
+_latest_update: Optional[dict] = None  # {"version": str, "url": str} once a newer release is found
+
+def _version_tuple(v: str):
+    parts = []
+    for p in v.strip().lstrip("v").split("."):
+        digits = "".join(c for c in p if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+def _check_for_update_once():
+    """One GitHub Releases API hit, no auth needed (public repo). Any failure
+    — offline, DNS, rate limit, whatever — just means no update is reported
+    this cycle; the background loop tries again later on its own."""
+    global _latest_update
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "GeniusSetListMobile"},
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        latest = (data.get("tag_name") or "").strip()
+        if latest and _version_tuple(latest) > _version_tuple(APP_VERSION):
+            _latest_update = {"version": latest, "url": data.get("html_url") or f"https://github.com/{UPDATE_REPO}/releases/latest"}
+        else:
+            _latest_update = None
+    except Exception:
+        pass  # stays whatever it was — a transient failure shouldn't clear a real result
+
+def update_check_loop():
+    """Runs for the life of the app: checks immediately at startup, then every
+    few hours — "when it has an internet connection" isn't an event this app
+    can observe directly on Windows without extra dependencies, so periodic
+    retry stands in for it (a failed check is silent and just tries again)."""
+    while True:
+        _check_for_update_once()
+        time.sleep(6 * 3600)
+
+def get_update_for_tray() -> dict:
+    return {"current_version": APP_VERSION, "update": _latest_update}
+
 def get_status_for_tray() -> dict:
     connected = bridge_connected()
     state = read_bridge_state() if connected else {}
@@ -958,6 +1003,7 @@ if __name__ == "__main__":
     # firewall step. A daemon thread means the worst case is "the rule never
     # gets created," never "the app never starts."
     threading.Thread(target=request_firewall_access, daemon=True).start()
+    threading.Thread(target=update_check_loop, daemon=True).start()
 
     _bi = install_bridge()
     for _line in _bi.get("log", []):
@@ -997,6 +1043,7 @@ if __name__ == "__main__":
         get_clients_fn=get_clients_for_tray,
         get_pairing_fn=get_pairing_for_tray,
         get_local_url_fn=get_local_url_for_tray,
+        get_update_fn=get_update_for_tray,
         get_phrase_fn=get_phrase_for_tray,
         set_phrase_fn=set_phrase_for_tray,
         set_admin_fn=set_admin_for_tray,
