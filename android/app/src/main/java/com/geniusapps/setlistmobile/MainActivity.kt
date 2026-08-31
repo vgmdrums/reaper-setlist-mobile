@@ -13,6 +13,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -36,6 +38,19 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webView)
         val spinner = findViewById<ProgressBar>(R.id.loadingSpinner)
+
+        // setDecorFitsSystemWindows(false) above means the app draws under
+        // the status bar / notch itself — fine since those bars are hidden,
+        // but a physical camera cutout is still there and can clip content
+        // (like the Stage view's REAPER banner) that sits flush at the very
+        // top of the page. Pad the WebView by exactly the cutout's inset so
+        // nothing renders underneath it, while everything else still uses
+        // the full edge-to-edge screen.
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            view.updatePadding(top = cutout.top)
+            insets
+        }
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
