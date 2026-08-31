@@ -151,9 +151,28 @@ class TrayApp:
         update = self.get_update()
         self._last_clients_key = self._clients_key(clients)
 
-        # Update banner sits above everything else — it's the one thing here
-        # that means "go do something outside this window," so it shouldn't
-        # get buried below the device list.
+        # REAPER connection is the single most important thing in this
+        # window — nothing else here works without it — so it gets its own
+        # full-width row at the very top instead of blending in as just
+        # another labeled section further down.
+        connected = status.get("reaper_connected")
+        reaper_bg = "#123a1e" if connected else "#3a1414"
+        reaper_fg = "#3ecf6e" if connected else "#ff6b6b"
+        reaper_row = tk.Frame(win, bg=reaper_bg)
+        reaper_row.pack(fill="x")
+        tk.Label(reaper_row, text=("● REAPER CONNECTED" if connected else "○ REAPER NOT CONNECTED"),
+                 bg=reaper_bg, fg=reaper_fg, font=("Segoe UI", 13, "bold")).pack(pady=(10, 0))
+        if connected and status.get("current_project"):
+            tk.Label(reaper_row, text=status["current_project"], font=("Segoe UI", 8), bg=reaper_bg, fg=FG_DIM).pack(pady=(0, 10))
+        elif not connected:
+            tk.Label(reaper_row, text="Open REAPER and run genius_bridge.lua", font=("Segoe UI", 8),
+                     bg=reaper_bg, fg=FG_DIM).pack(pady=(0, 10))
+        else:
+            tk.Frame(reaper_row, bg=reaper_bg, height=6).pack()
+
+        # Update banner — the one thing here that means "go do something
+        # outside this window," so it shouldn't get buried below the device
+        # list, but it's still secondary to the REAPER status above.
         pending = update.get("update")
         if pending:
             banner = tk.Frame(win, bg="#2a2410", highlightbackground=ACCENT, highlightthickness=1)
@@ -176,13 +195,6 @@ class TrayApp:
         self._update_check_button.pack(side="right")
         self._update_check_status_label = tk.Label(win, text="", font=("Segoe UI", 8), bg=BG, fg=FG_DIM)
         self._update_check_status_label.pack()
-
-        tk.Label(win, text="REAPER bridge", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
-        connected = status.get("reaper_connected")
-        tk.Label(win, text="Connected" if connected else "Not connected", bg=BG,
-                 fg="#3ecf6e" if connected else "#ff6b6b").pack()
-        if connected and status.get("current_project"):
-            tk.Label(win, text=status["current_project"], font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack()
 
         # Fallback for when the phone can't reach the companion (Wi-Fi
         # trouble, phone died, whatever): opens the exact same control
