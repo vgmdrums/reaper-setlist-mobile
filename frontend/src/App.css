@@ -34,7 +34,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
   background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0
 }
 .header-left{display:flex;align-items:center;gap:10px;min-width:0}
-.header-center{display:flex;justify-content:center}
 .header-right{display:flex;align-items:center;gap:8px;justify-content:flex-end}
 
 .logo{display:flex;align-items:baseline;gap:6px;user-select:none;flex-shrink:0}
@@ -66,21 +65,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 }
 .mode-btn.on{background:var(--accent);color:#fff}
 .mode-btn:not(.on):hover{color:var(--text);background:var(--bg4)}
-
-/* Status badge */
-.status-badge{
-  display:flex;align-items:center;gap:7px;
-  padding:4px 12px;border-radius:2px;border:1px solid;
-  font-family:var(--mono);font-size:11px;letter-spacing:.1em;transition:all .3s
-}
-.status-live   {border-color:var(--green);color:var(--green);background:var(--gdim)}
-.status-warning{border-color:var(--yellow);color:var(--yellow);background:rgba(240,192,64,.1)}
-.status-offline{border-color:var(--accent);color:var(--accent);background:var(--adim)}
-.status-pip{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
-.status-live .status-pip{animation:pip 2s ease-in-out infinite}
-.status-warning .status-pip{animation:blink 1s step-end infinite}
-@keyframes pip{0%,100%{opacity:1}50%{opacity:.3}}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
 /* Position */
 .pos-disp{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font-family:var(--mono);flex-shrink:0}

@@ -170,23 +170,6 @@ function DeviceNameGate() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// StatusBadge
-// ─────────────────────────────────────────────────────────────────────────────
-function StatusBadge({ reaperConnected, wsConnected }) {
-  const [state, label] = !wsConnected
-    ? ["offline",  "OFFLINE"]
-    : !reaperConnected
-    ? ["warning", "REAPER NOT FOUND"]
-    : ["live",    "REAPER LIVE"];
-  return (
-    <div className={`status-badge status-${state}`}>
-      <span className="status-pip" />
-      {label}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // RegionRow (browser panel)
 // ─────────────────────────────────────────────────────────────────────────────
 function RegionRow({ region, highlighted, onClick, onAdd, onPlay }) {
@@ -2847,13 +2830,10 @@ export default function App() {
           )}
         </div>
 
-        <div className="header-center">
-          <StatusBadge reaperConnected={reaperConnected} wsConnected={wsConnected} />
-        </div>
-
-        {/* Everything past the connection badge is admin-only chrome — a
-            non-admin device is always in Stage view anyway, so there's
-            nothing here for it to do. */}
+        {/* Everything past the logo is admin-only chrome — a non-admin
+            device is always in Stage view anyway, so there's nothing here
+            for it to do. REAPER connection status lives in its own banner
+            in Stage view now, not a header badge. */}
         {isAdmin && (
         <div className="header-right">
           <button className="hdr-btn" onClick={() => openReaper(activeSetlist?.rppPath)} title="Launch Reaper">

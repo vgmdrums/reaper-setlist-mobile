@@ -25,7 +25,7 @@ from typing import List, Optional
 import pairing
 
 PORT = 9760
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
