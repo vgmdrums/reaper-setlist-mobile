@@ -121,27 +121,16 @@ class TrayApp:
 
         win = tk.Toplevel(self.root)
         win.title("Genius SetList Mobile")
-        win.geometry("420x700")
         win.configure(bg=BG)
-        win.resizable(False, True)
+        # Resizable rather than a fixed size or an internal scrollbar — the
+        # scrollbar approach turned out buggy (reported: scroll region way
+        # taller than the actual content). A window that sizes itself to its
+        # content and lets the OS handle resizing is simpler and avoids that
+        # whole class of bug; _refresh_status_window sizes it after building.
+        win.resizable(True, True)
         win.protocol("WM_DELETE_WINDOW", win.withdraw)
         self._status_win = win
-
-        # Scrollable content — a fixed, non-scrolling window silently clips
-        # whatever's below its bottom edge (this bit the user on a laptop
-        # with more devices/less vertical screen space than dev testing).
-        # Everything below is built inside `content`, not `win` directly.
-        canvas = tk.Canvas(win, bg=BG, highlightthickness=0)
-        vsb = tk.Scrollbar(win, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=vsb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
-        content = tk.Frame(canvas, bg=BG)
-        content_window = canvas.create_window((0, 0), window=content, anchor="nw")
-        content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(content_window, width=e.width))
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-        self._status_content = content
+        self._status_content = win
 
         self._refresh_status_window()
         self._start_auto_refresh()
@@ -230,12 +219,12 @@ class TrayApp:
         else:
             tk.Label(win, text="(none yet)", bg=BG, fg=FG_DIM).pack()
 
-        tk.Label(win, text="Pair a new phone", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
-        if pairing["ok"]:
-            self._render_qr(win, pairing["payload"])
-        else:
-            tk.Label(win, text=pairing["error"], wraplength=300, bg=BG, fg="#ff6b6b", justify="left").pack(padx=16)
-
+        # Phrase goes first and has no dependency on the QR/network code path
+        # below — it's just a locally-stored string, always available, so it
+        # renders even if QR generation (network lookup + the qrcode lib)
+        # fails for some reason. That ordering is deliberate: an exception in
+        # _render_qr used to silently abort everything after it, including
+        # this section and the buttons at the bottom.
         tk.Label(win, text="Or type this phrase in the app", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
         tk.Label(win, text="Both devices must be on the same Wi-Fi", font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack()
         phrase_row = tk.Frame(win, bg=BG)
@@ -249,12 +238,30 @@ class TrayApp:
         self._phrase_status_label = tk.Label(win, text="", font=("Segoe UI", 8), bg=BG, fg=FG)
         self._phrase_status_label.pack()
 
+        tk.Label(win, text="Or scan this QR code", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
+        if pairing["ok"]:
+            try:
+                self._render_qr(win, pairing["payload"])
+            except Exception as e:
+                tk.Label(win, text=f"QR code unavailable: {e}", wraplength=300, bg=BG, fg="#ff6b6b",
+                         justify="left").pack(padx=16)
+        else:
+            tk.Label(win, text=pairing["error"], wraplength=300, bg=BG, fg="#ff6b6b", justify="left").pack(padx=16)
+
         btns = tk.Frame(win, bg=BG)
         btns.pack(pady=14)
         tk.Button(btns, text="Refresh", command=self._refresh_status_window,
                   bg=BG2, fg=FG, activebackground=BG2, activeforeground=FG, relief="flat").pack(side="left", padx=6)
         tk.Button(btns, text="Close", command=self._status_win.withdraw,
                   bg=BG2, fg=FG, activebackground=BG2, activeforeground=FG, relief="flat").pack(side="left", padx=6)
+
+        # Size the window to fit what was actually built, capped to the
+        # screen so a long device list still fits on-screen without needing
+        # the scrollbar approach that caused the oversized-scroll bug.
+        win.update_idletasks()
+        target_h = min(win.winfo_reqheight(), win.winfo_screenheight() - 80)
+        target_w = max(420, win.winfo_reqwidth())
+        win.geometry(f"{target_w}x{target_h}")
 
     @staticmethod
     def _clients_key(clients):
