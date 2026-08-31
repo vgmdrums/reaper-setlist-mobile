@@ -25,7 +25,7 @@ from typing import List, Optional
 import pairing
 
 PORT = 9760
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -812,10 +812,11 @@ def _version_tuple(v: str):
         parts.append(int(digits) if digits else 0)
     return tuple(parts)
 
-def _check_for_update_once():
-    """One GitHub Releases API hit, no auth needed (public repo). Any failure
-    — offline, DNS, rate limit, whatever — just means no update is reported
-    this cycle; the background loop tries again later on its own."""
+def _check_for_update_once() -> bool:
+    """One GitHub Releases API hit, no auth needed (public repo). Returns
+    whether the check itself succeeded — distinct from whether an update was
+    found — so a manual "Check for Updates" click can tell the user "you're
+    up to date" apart from "couldn't reach GitHub"."""
     global _latest_update
     try:
         import urllib.request
@@ -830,8 +831,9 @@ def _check_for_update_once():
             _latest_update = {"version": latest, "url": data.get("html_url") or f"https://github.com/{UPDATE_REPO}/releases/latest"}
         else:
             _latest_update = None
+        return True
     except Exception:
-        pass  # stays whatever it was — a transient failure shouldn't clear a real result
+        return False  # _latest_update stays whatever it was — a transient failure shouldn't clear a real result
 
 def update_check_loop():
     """Runs for the life of the app: checks immediately at startup, then every
@@ -844,6 +846,14 @@ def update_check_loop():
 
 def get_update_for_tray() -> dict:
     return {"current_version": APP_VERSION, "update": _latest_update}
+
+def check_for_update_now_for_tray() -> dict:
+    """The tray's manual "Check for Updates" button — same lookup as the
+    background loop, just synchronous and on demand."""
+    ok = _check_for_update_once()
+    result = get_update_for_tray()
+    result["checked_ok"] = ok
+    return result
 
 def get_status_for_tray() -> dict:
     connected = bridge_connected()
@@ -1051,6 +1061,7 @@ if __name__ == "__main__":
         get_pairing_fn=get_pairing_for_tray,
         get_local_url_fn=get_local_url_for_tray,
         get_update_fn=get_update_for_tray,
+        check_update_fn=check_for_update_now_for_tray,
         get_phrase_fn=get_phrase_for_tray,
         set_phrase_fn=set_phrase_for_tray,
         set_admin_fn=set_admin_for_tray,

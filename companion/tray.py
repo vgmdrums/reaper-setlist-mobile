@@ -50,14 +50,15 @@ def _load_icon() -> Image.Image:
 
 
 class TrayApp:
-    def __init__(self, get_status_fn, get_clients_fn, get_pairing_fn, get_local_url_fn, get_update_fn, get_phrase_fn, set_phrase_fn,
-                 set_admin_fn, set_transport_control_fn, remove_device_fn, on_quit):
+    def __init__(self, get_status_fn, get_clients_fn, get_pairing_fn, get_local_url_fn, get_update_fn, check_update_fn,
+                 get_phrase_fn, set_phrase_fn, set_admin_fn, set_transport_control_fn, remove_device_fn, on_quit):
         """
         get_status_fn()  -> {"reaper_connected": bool, "current_project": str|None}
         get_clients_fn() -> [{"label", "device_id", "is_admin", "can_control", "online", "last_seen"}, ...]
         get_pairing_fn() -> {"ok": bool, "payload": {host,port,token}|None, "error": str|None}
         get_local_url_fn() -> str (Plan B — opens the app on this PC via localhost)
-        get_update_fn()  -> {"current_version": str, "update": {"version","url"}|None}
+        get_update_fn()  -> {"current_version": str, "update": {"version","url"}|None} (cached, instant)
+        check_update_fn() -> same shape plus "checked_ok": bool -- blocking network call, run off the Tk thread
         get_phrase_fn()  -> str (current pairing phrase)
         set_phrase_fn(phrase: str) -> str (normalized phrase actually saved)
         set_admin_fn(device_id: str, is_admin: bool) -- grants/revokes Edit-mode access for this device
@@ -70,6 +71,7 @@ class TrayApp:
         self.get_pairing = get_pairing_fn
         self.get_local_url = get_local_url_fn
         self.get_update = get_update_fn
+        self.check_update = check_update_fn
         self.get_phrase = get_phrase_fn
         self.set_phrase = set_phrase_fn
         self.set_admin = set_admin_fn
@@ -78,6 +80,9 @@ class TrayApp:
         self.on_quit = on_quit
         self._phrase_entry = None
         self._phrase_status_label = None
+        self._update_check_button = None
+        self._update_check_status_label = None
+        self._checking_for_update = False
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -160,6 +165,17 @@ class TrayApp:
             tk.Button(banner, text="View Release", command=lambda u=pending["url"]: webbrowser.open(u),
                       bg=BG2, fg=ACCENT, activebackground=BG2, activeforeground=ACCENT,
                       relief="flat", font=("Segoe UI", 9, "bold")).pack(pady=8, padx=10, fill="x")
+
+        version_row = tk.Frame(win, bg=BG)
+        version_row.pack(fill="x", padx=20, pady=(10, 0))
+        tk.Label(version_row, text=f"v{update.get('current_version', '?')}", bg=BG, fg=FG_DIM,
+                 font=("Segoe UI", 8)).pack(side="left")
+        self._update_check_button = tk.Button(version_row, text="Check for Updates", command=self._check_for_updates_clicked,
+                                               bg=BG2, fg=FG, activebackground=BG2, activeforeground=FG,
+                                               relief="flat", font=("Segoe UI", 8))
+        self._update_check_button.pack(side="right")
+        self._update_check_status_label = tk.Label(win, text="", font=("Segoe UI", 8), bg=BG, fg=FG_DIM)
+        self._update_check_status_label.pack()
 
         tk.Label(win, text="REAPER bridge", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
         connected = status.get("reaper_connected")
@@ -315,6 +331,41 @@ class TrayApp:
 
     def _open_local(self):
         webbrowser.open(self.get_local_url())
+
+    def _check_for_updates_clicked(self):
+        if self._checking_for_update:
+            return
+        self._checking_for_update = True
+        if self._update_check_button is not None:
+            self._update_check_button.config(state="disabled", text="Checking…")
+        if self._update_check_status_label is not None:
+            self._update_check_status_label.config(text="")
+
+        def worker():
+            # check_update() blocks on a network call (up to a few seconds) —
+            # run it off the Tk thread so the window doesn't freeze, then
+            # hand the result back via root.after (Tk calls must stay on the
+            # main thread, same pattern as _show_status).
+            result = self.check_update()
+            self.root.after(0, lambda: self._on_update_check_done(result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_check_done(self, result):
+        self._checking_for_update = False
+        if result.get("update"):
+            # A newer version showed up — rebuild the whole window so the
+            # update banner appears (also restores the button/label refs).
+            self._refresh_status_window()
+            return
+        if self._update_check_button is not None:
+            self._update_check_button.config(state="normal", text="Check for Updates")
+        if self._update_check_status_label is not None:
+            if result.get("checked_ok"):
+                self._update_check_status_label.config(text="You're up to date", fg="#3ecf6e")
+            else:
+                self._update_check_status_label.config(text="Couldn't check — no internet?", fg="#ff6b6b")
+            self._update_check_status_label.after(3000, lambda: self._update_check_status_label.config(text="") if self._update_check_status_label.winfo_exists() else None)
 
     def _remove_device(self, device_id, label):
         # A native confirm dialog — this is the one destructive action in
