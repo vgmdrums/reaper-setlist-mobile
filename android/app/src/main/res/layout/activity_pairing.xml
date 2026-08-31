@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0e0e10"
+    android:padding="24dp"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/titleText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/pairing_title"
+        android:textColor="#e8e8ec"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/device_name_label"
+        android:textColor="#a0a0a8"
+        android:textSize="12sp"
+        android:layout_marginBottom="8dp" />
+
+    <EditText
+        android:id="@+id/deviceNameInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="48dp"
+        android:inputType="textCapWords"
+        android:maxLength="40"
+        android:textColor="#e8e8ec"
+        android:textColorHint="#666"
+        android:background="#1a1a1e"
+        android:padding="10dp"
+        android:hint="@string/device_name_hint"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/pairing_hint"
+        android:textColor="#a0a0a8"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/scanButton"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="@string/scan_qr"
+        android:backgroundTint="#4a9eff"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/pairing_manual_hint"
+        android:textColor="#a0a0a8"
+        android:textSize="12sp"
+        android:layout_marginBottom="8dp" />
+
+    <EditText
+        android:id="@+id/manualInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="48dp"
+        android:inputType="textMultiLine"
+        android:textColor="#e8e8ec"
+        android:textColorHint="#666"
+        android:background="#1a1a1e"
+        android:padding="10dp"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/connectButton"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="@string/pairing_connect"
+        style="?android:attr/borderlessButtonStyle"
+        android:textColor="#4a9eff" />
+
+    <TextView
+        android:id="@+id/errorText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#ff6b6b"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:layout_marginTop="12dp"
+        android:visibility="gone" />
+
+</LinearLayout>

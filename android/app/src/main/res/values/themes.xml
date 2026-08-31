@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SetlistMobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#4a9eff</item>
+        <item name="colorPrimaryDark">#0e0e10</item>
+        <item name="android:windowBackground">#0e0e10</item>
+    </style>
+</resources>

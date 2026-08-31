@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Genius SetList</string>
+    <string name="device_name_label">NAME THIS DEVICE (required — shown in the tray\'s admin list)</string>
+    <string name="device_name_hint">e.g. Kyle\'s Phone, Stage Left Tablet</string>
+    <string name="device_name_error">Name this device before connecting.</string>
+    <string name="pairing_title">Pair with your computer</string>
+    <string name="pairing_hint">Open Genius SetList Mobile in your PC\'s system tray, choose \"Show status &amp; pairing QR\", and scan the code below.</string>
+    <string name="scan_qr">Scan QR code</string>
+    <string name="pairing_manual_hint">Or type the pairing phrase shown in the tray app (e.g. tiger-lagoon-84):</string>
+    <string name="pairing_connect">Connect</string>
+    <string name="pairing_searching">Searching…</string>
+    <string name="pairing_error_invalid">Enter the pairing phrase from the tray app.</string>
+    <string name="pairing_error_not_found">No computer found with that phrase — make sure both devices are on the same Wi-Fi.</string>
+    <string name="menu_repair">Re-pair with a computer</string>
+    <string name="menu_reload">Reload</string>
+</resources>

@@ -1,0 +1,17 @@
+node_modules/
+frontend/build/
+companion/static/
+companion/build/
+companion/dist/
+companion/.venv/
+__pycache__/
+*.pyc
+*.spec.bak
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+*.apk
+.idea/
+.vscode/
+*.log

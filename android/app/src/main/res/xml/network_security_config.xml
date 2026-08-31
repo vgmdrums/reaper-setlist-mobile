@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The companion runs plain http:// on the local Wi-Fi network (phone and PC on
+  the same access point), so Android's default (HTTPS-only) cleartext block
+  has to be relaxed. There's no TLS here — the pairing token plus the Wi-Fi
+  network's own encryption (WPA2/3) are the protection, same trust model as
+  the old desktop app's LAN-based mobile controller.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
