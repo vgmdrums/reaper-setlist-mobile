@@ -25,7 +25,7 @@ from typing import List, Optional
 import pairing
 
 PORT = 9760
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -752,7 +752,13 @@ def start_server():
     async def _serve():
         global _server_loop
         _server_loop = asyncio.get_running_loop()
-        cfg = uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="warning")
+        # log_config=None: a windowed (no-console) build has no real
+        # sys.stdout/stderr for uvicorn's default logging.config.dictConfig()
+        # to attach a formatter to — it raises "Unable to configure
+        # formatter 'default'" and the whole server never starts. Skipping
+        # uvicorn's own logging setup avoids that codepath entirely; nothing
+        # here depends on uvicorn's console log formatting anyway.
+        cfg = uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="warning", log_config=None)
         await uvicorn.Server(cfg).serve()
     try:
         asyncio.run(_serve())
@@ -1013,16 +1019,17 @@ if __name__ == "__main__":
     if not wait_for_server(PORT):
         # Continuing here would show a tray icon that looks fine but has no
         # working server behind it — every request (including "Launch Local
-        # App") would just fail to connect with no clue why. The most common
-        # cause is a leftover instance still holding the port.
+        # App") would just fail to connect with no clue why.
         detail = str(_server_error) if _server_error else "Timed out waiting for the local server to start."
-        msg = (
-            "Genius SetList Mobile couldn't start its local server.\n\n"
-            f"{detail}\n\n"
-            "This usually means another copy is already running — check your\n"
-            "system tray (click the ^ arrow to see hidden icons) before\n"
-            "launching this again."
-        )
+        # Only the port-already-taken case is actually "another copy is
+        # running" — anything else (a startup exception in the server
+        # itself, like a bad logging/config setup) needs different guidance,
+        # so don't guess a cause the error text doesn't support.
+        if "address" in detail.lower() or "10048" in detail or "in use" in detail.lower():
+            hint = "This usually means another copy is already running — check your\nsystem tray (click the ^ arrow to see hidden icons) before\nlaunching this again."
+        else:
+            hint = "This looks like a startup error rather than a conflicting instance.\nTry reinstalling the latest version; if it keeps happening, save this\nexact message to report it."
+        msg = f"Genius SetList Mobile couldn't start its local server.\n\n{detail}\n\n{hint}"
         print(f"  FATAL: {msg}")
         try:
             import ctypes
