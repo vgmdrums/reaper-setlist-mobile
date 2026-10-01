@@ -3,6 +3,7 @@ package com.geniusapps.setlistmobile
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -23,6 +24,7 @@ object PairingStore {
     private val KEY_TOKEN = stringPreferencesKey("token")
     private val KEY_DEVICE_LABEL = stringPreferencesKey("deviceLabel")
     private val KEY_LAST_MANUAL_INPUT = stringPreferencesKey("lastManualInput")
+    private val KEY_FULLSCREEN = booleanPreferencesKey("fullscreen")
 
     fun flow(context: Context): Flow<PairingInfo?> =
         context.pairingDataStore.data.map { prefs ->
@@ -65,5 +67,14 @@ object PairingStore {
 
     suspend fun saveLastManualInput(context: Context, text: String) {
         context.pairingDataStore.edit { prefs -> prefs[KEY_LAST_MANUAL_INPUT] = text }
+    }
+
+    /** Off by default — fullscreen is now opt-in via the in-app menu rather
+     * than forced on launch. */
+    suspend fun getFullscreen(context: Context): Boolean =
+        context.pairingDataStore.data.map { it[KEY_FULLSCREEN] ?: false }.first()
+
+    suspend fun setFullscreen(context: Context, enabled: Boolean) {
+        context.pairingDataStore.edit { prefs -> prefs[KEY_FULLSCREEN] = enabled }
     }
 }

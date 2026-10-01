@@ -33,12 +33,14 @@ import java.net.URLEncoder
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    // Off by default — fullscreen used to be forced on every launch; it's
+    // now opt-in via the in-app menu, loaded from PairingStore below.
+    private var fullscreenEnabled = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        enableFullscreen()
 
         webView = findViewById(R.id.webView)
         val spinner = findViewById<ProgressBar>(R.id.loadingSpinner)
@@ -67,12 +69,18 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.menuButton).setOnClickListener { anchor ->
             PopupMenu(this, anchor).apply {
                 menuInflater.inflate(R.menu.main_menu, menu)
+                // Title reflects current state rather than relying on a
+                // checkable menu item's checkmark, which some OEM skins
+                // don't render visibly in a PopupMenu.
+                menu.findItem(R.id.action_fullscreen).title =
+                    getString(if (fullscreenEnabled) R.string.menu_fullscreen_off else R.string.menu_fullscreen_on)
                 setOnMenuItemClickListener { item ->
                     when (item.itemId) {
                         // Re-runs the USB-vs-Wi-Fi resolution (not just a
                         // same-origin webView.reload()) so plugging/unplugging
                         // the cable mid-session takes effect on demand.
                         R.id.action_reload -> { loadFromSavedPairing(); true }
+                        R.id.action_fullscreen -> { toggleFullscreen(); true }
                         R.id.action_repair -> { rePair(); true }
                         else -> false
                     }
@@ -80,7 +88,22 @@ class MainActivity : AppCompatActivity() {
             }.show()
         }
 
+        lifecycleScope.launch {
+            fullscreenEnabled = PairingStore.getFullscreen(this@MainActivity)
+            applyFullscreenSetting()
+        }
+
         loadFromSavedPairing()
+    }
+
+    private fun toggleFullscreen() {
+        fullscreenEnabled = !fullscreenEnabled
+        lifecycleScope.launch { PairingStore.setFullscreen(this@MainActivity, fullscreenEnabled) }
+        applyFullscreenSetting()
+    }
+
+    private fun applyFullscreenSetting() {
+        if (fullscreenEnabled) enableFullscreen() else disableFullscreen()
     }
 
     private fun loadFromSavedPairing() {
@@ -143,9 +166,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun disableFullscreen() {
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enableFullscreen() // re-hide after a transient swipe-reveal or app resume
+        if (hasFocus && fullscreenEnabled) enableFullscreen() // re-hide after a transient swipe-reveal or app resume
     }
 
     private fun goToPairing() {
