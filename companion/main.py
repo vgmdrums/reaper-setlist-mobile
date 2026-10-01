@@ -25,7 +25,7 @@ from typing import List, Optional
 import pairing
 
 PORT = 9760
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -855,6 +855,94 @@ def check_for_update_now_for_tray() -> dict:
     result["checked_ok"] = ok
     return result
 
+# ── USB tethering (adb reverse) ───────────────────────────────────────────────
+# Fully automatic — no button, no setup. Whenever an Android phone with USB
+# debugging enabled is plugged in, this keeps `adb reverse tcp:PORT tcp:PORT`
+# alive so the phone's own 127.0.0.1:PORT forwards over the USB cable to this
+# machine. The Android app (MainActivity.kt) tries 127.0.0.1 first on every
+# launch and falls back to the saved Wi-Fi host if nothing answers there, so
+# the whole "use USB if available" behavior needs nothing from the user here
+# beyond accepting the one-time "Allow USB debugging?" prompt on the phone.
+_usb_tether_active = False
+
+def _find_adb() -> str:
+    """Path to adb.exe, trying PATH first then common Android SDK install
+    locations. Returns the bare command name as a last resort (fails loud
+    with FileNotFoundError if truly absent, which callers already handle)."""
+    import shutil
+    found = shutil.which("adb")
+    if found:
+        return found
+    local = os.environ.get("LOCALAPPDATA", "")
+    user = os.environ.get("USERPROFILE", "")
+    candidates = [
+        os.path.join(local, "Android", "Sdk", "platform-tools", "adb.exe"),
+        os.path.join(user, "AppData", "Local", "Android", "Sdk", "platform-tools", "adb.exe"),
+        r"C:\platform-tools\adb.exe",
+        r"C:\Android\platform-tools\adb.exe",
+        os.path.join(user, "platform-tools", "adb.exe"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return "adb"
+
+_adb_server_started = False
+
+def _ensure_adb_server(adb: str):
+    """Starting the adb server for the first time via a captured-output call
+    like `adb devices` can hang subprocess.run() indefinitely on Windows —
+    adb spawns its server as a detached grandchild that can end up holding
+    the parent call's stdout pipe open forever, so the timeout never fires
+    (reproduced: a captured `adb devices` left an orphaned adb.exe running
+    and never returned even past its own timeout). Starting the server on
+    its own first, fully detached and with output thrown away rather than
+    piped, avoids creating that stuck pipe in the first place; every call
+    after this one is a fast client→already-running-server round trip."""
+    global _adb_server_started
+    if _adb_server_started:
+        return
+    try:
+        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen([adb, "start-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                          stdin=subprocess.DEVNULL, creationflags=creationflags)
+        time.sleep(1)  # give the server a moment to actually come up
+    except Exception:
+        pass
+    _adb_server_started = True
+
+def _authorized_usb_devices(adb: str) -> list:
+    """adb device ids in state 'device' (authorized and ready) — excludes
+    'unauthorized' (debugging prompt not yet accepted on the phone) and
+    'offline', which `adb reverse` can't use anyway."""
+    try:
+        r = subprocess.run([adb, "devices"], capture_output=True, text=True, timeout=5)
+        return [line.split("\t")[0] for line in r.stdout.strip().split("\n")[1:]
+                if line.strip() and "\tdevice" in line]
+    except Exception:
+        return []
+
+def usb_tether_loop():
+    """Runs for the life of the app. Harmless no-op (adb just isn't found)
+    on a machine without the Android SDK installed."""
+    global _usb_tether_active
+    adb = _find_adb()
+    _ensure_adb_server(adb)
+    while True:
+        try:
+            if _authorized_usb_devices(adb):
+                r = subprocess.run([adb, "reverse", f"tcp:{PORT}", f"tcp:{PORT}"],
+                                    capture_output=True, text=True, timeout=5)
+                _usb_tether_active = r.returncode == 0
+            else:
+                _usb_tether_active = False
+        except Exception:
+            _usb_tether_active = False
+        time.sleep(5)
+
+def get_usb_status_for_tray() -> dict:
+    return {"active": _usb_tether_active}
+
 def get_status_for_tray() -> dict:
     connected = bridge_connected()
     state = read_bridge_state() if connected else {}
@@ -1020,6 +1108,7 @@ if __name__ == "__main__":
     # gets created," never "the app never starts."
     threading.Thread(target=request_firewall_access, daemon=True).start()
     threading.Thread(target=update_check_loop, daemon=True).start()
+    threading.Thread(target=usb_tether_loop, daemon=True).start()
 
     _bi = install_bridge()
     for _line in _bi.get("log", []):
@@ -1062,6 +1151,7 @@ if __name__ == "__main__":
         get_local_url_fn=get_local_url_for_tray,
         get_update_fn=get_update_for_tray,
         check_update_fn=check_for_update_now_for_tray,
+        get_usb_fn=get_usb_status_for_tray,
         get_phrase_fn=get_phrase_for_tray,
         set_phrase_fn=set_phrase_for_tray,
         set_admin_fn=set_admin_for_tray,

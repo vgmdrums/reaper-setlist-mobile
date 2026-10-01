@@ -51,7 +51,7 @@ def _load_icon() -> Image.Image:
 
 class TrayApp:
     def __init__(self, get_status_fn, get_clients_fn, get_pairing_fn, get_local_url_fn, get_update_fn, check_update_fn,
-                 get_phrase_fn, set_phrase_fn, set_admin_fn, set_transport_control_fn, remove_device_fn, on_quit):
+                 get_usb_fn, get_phrase_fn, set_phrase_fn, set_admin_fn, set_transport_control_fn, remove_device_fn, on_quit):
         """
         get_status_fn()  -> {"reaper_connected": bool, "current_project": str|None}
         get_clients_fn() -> [{"label", "device_id", "is_admin", "can_control", "online", "last_seen"}, ...]
@@ -59,6 +59,7 @@ class TrayApp:
         get_local_url_fn() -> str (Plan B — opens the app on this PC via localhost)
         get_update_fn()  -> {"current_version": str, "update": {"version","url"}|None} (cached, instant)
         check_update_fn() -> same shape plus "checked_ok": bool -- blocking network call, run off the Tk thread
+        get_usb_fn()     -> {"active": bool} -- whether adb reverse is currently tunneling a phone over USB
         get_phrase_fn()  -> str (current pairing phrase)
         set_phrase_fn(phrase: str) -> str (normalized phrase actually saved)
         set_admin_fn(device_id: str, is_admin: bool) -- grants/revokes Edit-mode access for this device
@@ -72,6 +73,7 @@ class TrayApp:
         self.get_local_url = get_local_url_fn
         self.get_update = get_update_fn
         self.check_update = check_update_fn
+        self.get_usb = get_usb_fn
         self.get_phrase = get_phrase_fn
         self.set_phrase = set_phrase_fn
         self.set_admin = set_admin_fn
@@ -149,6 +151,7 @@ class TrayApp:
         clients = self.get_clients()
         pairing = self.get_pairing()
         update = self.get_update()
+        usb = self.get_usb()
         self._last_clients_key = self._clients_key(clients)
 
         # REAPER connection is the single most important thing in this
@@ -169,6 +172,14 @@ class TrayApp:
                      bg=reaper_bg, fg=FG_DIM).pack(pady=(0, 10))
         else:
             tk.Frame(reaper_row, bg=reaper_bg, height=6).pack()
+
+        # Only shown when it's actually doing something — a Wi-Fi-only setup
+        # (the common case) shouldn't see a permanent "not connected" warning
+        # for a feature nobody asked for; this just confirms it when it
+        # kicks in (phone plugged in, USB debugging already authorized).
+        if usb.get("active"):
+            tk.Label(win, text="⚡ USB tether active — phone can reach this PC over the cable",
+                     bg=BG, fg="#3ecf6e", font=("Segoe UI", 8)).pack(pady=(8, 0))
 
         # Update banner — the one thing here that means "go do something
         # outside this window," so it shouldn't get buried below the device

@@ -16,7 +16,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -65,7 +69,10 @@ class MainActivity : AppCompatActivity() {
                 menuInflater.inflate(R.menu.main_menu, menu)
                 setOnMenuItemClickListener { item ->
                     when (item.itemId) {
-                        R.id.action_reload -> { webView.reload(); true }
+                        // Re-runs the USB-vs-Wi-Fi resolution (not just a
+                        // same-origin webView.reload()) so plugging/unplugging
+                        // the cable mid-session takes effect on demand.
+                        R.id.action_reload -> { loadFromSavedPairing(); true }
                         R.id.action_repair -> { rePair(); true }
                         else -> false
                     }
@@ -85,7 +92,32 @@ class MainActivity : AppCompatActivity() {
             }
             val label = PairingStore.getDeviceLabel(this@MainActivity) ?: ""
             val encodedLabel = URLEncoder.encode(label, "UTF-8")
-            webView.loadUrl(info.baseUrl() + "?token=" + info.token + "&device_label=" + encodedLabel)
+            // The companion keeps `adb reverse tcp:port tcp:port` alive
+            // automatically whenever this phone is plugged in with USB
+            // debugging authorized (see main.py's usb_tether_loop) — when
+            // that's active, 127.0.0.1 on THIS phone forwards over the
+            // cable to the companion PC. Try it first; if nothing answers
+            // there (no cable, debugging not authorized, companion not
+            // tethering), fall back to the saved Wi-Fi host exactly as
+            // before. A short timeout keeps the common Wi-Fi-only case from
+            // feeling any slower at launch.
+            val host = if (probeUsb(info.port, info.token)) "127.0.0.1" else info.host
+            webView.loadUrl("http://$host:${info.port}/?token=${info.token}&device_label=$encodedLabel")
+        }
+    }
+
+    private suspend fun probeUsb(port: Int, token: String): Boolean = withContext(Dispatchers.IO) {
+        var conn: HttpURLConnection? = null
+        try {
+            conn = URL("http://127.0.0.1:$port/health?token=$token").openConnection() as HttpURLConnection
+            conn.connectTimeout = 500
+            conn.readTimeout = 500
+            conn.requestMethod = "GET"
+            conn.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        } finally {
+            conn?.disconnect()
         }
     }
 
