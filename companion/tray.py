@@ -116,14 +116,28 @@ class TrayApp:
         )
 
     def notify(self, title, message):
-        """A toast from the tray icon. Callable from any thread; a failure
-        (icon not up yet, notifications unavailable) is never worth crashing
-        the caller over. Windows caps these at 63 / 255 characters and errors
-        on longer text, hence the truncation."""
+        """A quiet Windows notification from the tray icon — a toast in the
+        corner that lands in the notification center, never a dialog. Callable
+        from any thread; a failure (icon not up yet, notifications unavailable)
+        is never worth crashing the caller over. Windows caps these at 63 / 255
+        characters and errors on longer text, hence the truncation.
+
+        pystray's own notify() sets no flags, so the notification would play
+        the notification sound and ignore quiet hours. Sending it ourselves
+        lets us say: info icon, no sound, and hold it back during Do Not
+        Disturb / Focus Assist. Falls back to the plain call if pystray's
+        internals ever differ."""
+        title, message = title[:63], message[:255]
         try:
-            self.icon.notify(message[:255], title[:63])
+            from pystray._util import win32
+            NIIF_INFO, NIIF_NOSOUND, NIIF_RESPECT_QUIET_TIME = 0x01, 0x10, 0x80
+            self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo=message, szInfoTitle=title,
+                               dwInfoFlags=NIIF_INFO | NIIF_NOSOUND | NIIF_RESPECT_QUIET_TIME)
         except Exception:
-            pass
+            try:
+                self.icon.notify(message, title)
+            except Exception:
+                pass
 
     def _show_status(self, icon=None, item=None):
         self.root.after(0, self._build_status_window)
@@ -191,9 +205,9 @@ class TrayApp:
             warn_bg = "#2a2410"
             warn = tk.Frame(win, bg=warn_bg)
             warn.pack(fill="x")
-            tk.Label(warn, text="Setlist not open in REAPER", bg=warn_bg, fg=ACCENT,
+            tk.Label(warn, text="Mismatched project in REAPER", bg=warn_bg, fg=ACCENT,
                      font=("Segoe UI", 10, "bold")).pack(pady=(8, 0))
-            tk.Label(warn, text=f"Please open: {mismatch['setlist_name']} ({mismatch['wanted_name']})",
+            tk.Label(warn, text=mismatch["message"],
                      bg=warn_bg, fg=FG, font=("Segoe UI", 9), wraplength=380, justify="center").pack(pady=(0, 8), padx=10)
 
         # Always says what USB is doing — and why not, when it isn't working.
@@ -345,7 +359,7 @@ class TrayApp:
         the auto-refresh redraws only when something actually moved."""
         mismatch = status.get("project_mismatch") or {}
         return (self._clients_key(clients), usb.get("message"), status.get("reaper_connected"),
-                status.get("current_project"), mismatch.get("wanted_path"))
+                status.get("current_project"), mismatch.get("message"))
 
     def _start_auto_refresh(self):
         if self._auto_refresh_running:

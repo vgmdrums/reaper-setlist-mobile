@@ -28,7 +28,7 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.13"
+APP_VERSION = "1.0.14"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ def bridge_connected() -> bool:
     except OSError:
         return False
 
-def send_command(action: int = 0, pos: float = None, loop_pos: float = None, open_project: str = None) -> bool:
+def send_command(action: int = 0, pos: float = None, loop_pos: float = None) -> bool:
     cmd = {"id": str(uuid.uuid4())}
     if action:
         cmd["action"] = action
@@ -102,8 +102,6 @@ def send_command(action: int = 0, pos: float = None, loop_pos: float = None, ope
         cmd["pos"] = pos
     if loop_pos is not None:
         cmd["loop_pos"] = loop_pos
-    if open_project is not None:
-        cmd["open_project"] = open_project
     try:
         with open(CMD_FILE, "w", encoding="utf-8") as f:
             json.dump(cmd, f, separators=(',', ':'))
@@ -266,9 +264,6 @@ class PlayRequest(BaseModel):
 
 class SeekRequest(BaseModel):
     pos: float
-
-class OpenProjectRequest(BaseModel):
-    rpp_path: str
 
 class SaveSetlistsRequest(BaseModel):
     setlists: list
@@ -467,12 +462,6 @@ async def current_project_path():
     if not name and path:
         name = os.path.splitext(os.path.basename(path))[0]
     return {"path": path, "name": name}
-
-@api.post("/open-project")
-async def open_project(req: OpenProjectRequest):
-    if not bridge_connected(): return {"status": "bridge not running"}
-    send_command(open_project=req.rpp_path)
-    return {"status": "open command sent", "path": req.rpp_path}
 
 @api.post("/link-current-project")
 async def link_current_project():
@@ -747,7 +736,7 @@ async def serve_icon(filename: str):
     raise HTTPException(404, "Icon not found")
 
 API_ROUTES = {"health", "projects", "regions", "transport", "play", "seek", "stop", "pause",
-              "play-selected", "open-project", "link-current-project", "current-project-path",
+              "play-selected", "link-current-project", "current-project-path",
               "install-bridge", "tracks", "open-reaper", "setlists", "debug", "ws", "clients",
               "manifest.json", "icons", "sw.js", "midi-devices", "midi-reset", "midi",
               "instructions", "config-status"}
@@ -1080,18 +1069,20 @@ def get_project_mismatch() -> Optional[dict]:
     current = (read_bridge_state().get("proj_path") or "").strip()
     if _norm_path(current) == _norm_path(wanted):
         return None
+    setlist_name = setlist.get("name") or "Untitled setlist"
+    wanted_name = os.path.basename(wanted)
+    current_name = os.path.basename(current) if current else ""
     return {
         "setlist_id": setlist.get("id"),
-        "setlist_name": setlist.get("name") or "Untitled setlist",
+        "setlist_name": setlist_name,
         "wanted_path": wanted,
-        "wanted_name": os.path.basename(wanted),
+        "wanted_name": wanted_name,
         "current_path": current,
-        "current_name": os.path.basename(current) if current else "",
+        "current_name": current_name,
+        # One sentence shared by the notification and the tray window.
+        "message": (f'Setlist "{setlist_name}" is linked to {wanted_name}, but REAPER has '
+                    f'{current_name or "no saved project"} open.'),
     }
-
-def project_mismatch_message(m: dict) -> str:
-    return (f'The current setlist is not open in REAPER. Please open: '
-            f'{m["setlist_name"]} ({m["wanted_name"]})')
 
 def project_watch_loop(notify):
     """Runs for the life of the app; notify(title, message) shows the tray
@@ -1110,7 +1101,7 @@ def project_watch_loop(notify):
                 if key != pending_key:
                     pending_key, pending_since = key, time.time()
                 elif key != notified_key and time.time() - pending_since >= PROJECT_MISMATCH_GRACE:
-                    notify("Setlist not open in REAPER", project_mismatch_message(m))
+                    notify("Mismatched project in REAPER", m["message"])
                     notified_key = key
         except Exception:
             pass  # a bad read this round just means checking again next round

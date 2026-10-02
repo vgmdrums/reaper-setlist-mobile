@@ -1526,19 +1526,10 @@ export default function App() {
 
   function fetchInstructions() { setShowInstructions(true); }
 
-  // If Reaper isn't open yet and the setlist has an RPP, launch Reaper with the project directly
-  const didLaunchRef = useRef(false);
-  useEffect(() => {
-    if (reaperConnected || didLaunchRef.current) return;
-    const setlist = allSetlists.find(s => s.id === activeSetlistId);
-    if (!setlist?.rppPath) return;
-    didLaunchRef.current = true;
-    openReaper(setlist.rppPath);
-  }, [reaperConnected, activeSetlistId, allSetlists]);
-
-  // The setlist's project is no longer opened in Reaper automatically — the
-  // companion's tray shows a notification naming the project to open when the
-  // wrong one is up (see project_watch_loop in companion/main.py).
+  // Nothing here opens Reaper or its project on its own. If the project that's
+  // open isn't the setlist's, the companion shows a Windows notification (see
+  // project_watch_loop in companion/main.py); the header's Launch Reaper button
+  // is the only thing that starts Reaper.
 
 
   // Use a ref for fetchProjects/fetchRegions so the WS closure always sees current version
