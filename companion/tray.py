@@ -59,7 +59,7 @@ class TrayApp:
         get_local_url_fn() -> str (Plan B — opens the app on this PC via localhost)
         get_update_fn()  -> {"current_version": str, "update": {"version","url"}|None} (cached, instant)
         check_update_fn() -> same shape plus "checked_ok": bool -- blocking network call, run off the Tk thread
-        get_usb_fn()     -> {"active": bool} -- whether adb reverse is currently tunneling a phone over USB
+        get_usb_fn()     -> {"state": str, "message": str} -- what the USB tether is doing right now, and why not if it isn't
         get_phrase_fn()  -> str (current pairing phrase)
         set_phrase_fn(phrase: str) -> str (normalized phrase actually saved)
         set_admin_fn(device_id: str, is_admin: bool) -- grants/revokes Edit-mode access for this device
@@ -101,7 +101,7 @@ class TrayApp:
                 pass
         self._status_win = None
         self._qr_photo = None  # keep a reference so Tk doesn't garbage-collect it
-        self._last_clients_key = None
+        self._last_refresh_key = None
         self._auto_refresh_running = False
 
         show_status_item = pystray.MenuItem("Show status && pairing QR", self._show_status, default=True)
@@ -152,7 +152,7 @@ class TrayApp:
         pairing = self.get_pairing()
         update = self.get_update()
         usb = self.get_usb()
-        self._last_clients_key = self._clients_key(clients)
+        self._last_refresh_key = (self._clients_key(clients), usb.get("message"))
 
         # REAPER connection is the single most important thing in this
         # window — nothing else here works without it — so it gets its own
@@ -173,13 +173,16 @@ class TrayApp:
         else:
             tk.Frame(reaper_row, bg=reaper_bg, height=6).pack()
 
-        # Only shown when it's actually doing something — a Wi-Fi-only setup
-        # (the common case) shouldn't see a permanent "not connected" warning
-        # for a feature nobody asked for; this just confirms it when it
-        # kicks in (phone plugged in, USB debugging already authorized).
-        if usb.get("active"):
-            tk.Label(win, text="⚡ USB tether active — phone can reach this PC over the cable",
-                     bg=BG, fg="#3ecf6e", font=("Segoe UI", 8)).pack(pady=(8, 0))
+        # Always says what USB is doing — and why not, when it isn't working.
+        # A wired phone that silently does nothing looks identical whether
+        # the cause is the cable, USB debugging, a missing driver, or the
+        # "Allow USB debugging?" prompt nobody saw, so the message names it.
+        # Dim unless it's working (green) or needs the user to act (yellow),
+        # so it stays quiet for a Wi-Fi-only setup.
+        if usb.get("message"):
+            usb_color = {"active": "#3ecf6e", "unauthorized": ACCENT}.get(usb.get("state"), FG_DIM)
+            tk.Label(win, text=usb["message"], bg=BG, fg=usb_color, font=("Segoe UI", 8),
+                     wraplength=380, justify="center").pack(pady=(8, 0))
 
         # Update banner — the one thing here that means "go do something
         # outside this window," so it shouldn't get buried below the device
@@ -322,7 +325,7 @@ class TrayApp:
     def _auto_refresh_tick(self):
         win = self._status_win
         if win is not None and win.winfo_exists() and win.state() != "withdrawn":
-            if self._clients_key(self.get_clients()) != self._last_clients_key:
+            if (self._clients_key(self.get_clients()), self.get_usb().get("message")) != self._last_refresh_key:
                 self._refresh_status_window()
             self.root.after(2000, self._auto_refresh_tick)
         else:

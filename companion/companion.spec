@@ -27,6 +27,18 @@ datas += [('static', 'static')]
 # machine's REAPER Scripts folder regardless of dev/frozen state.
 datas += [('genius_bridge.lua', '.')]
 
+# Google's platform-tools adb (adb.exe + its two USB DLLs + NOTICE) so a
+# machine without the Android SDK can still tether a USB-connected phone/
+# tablet — main.py's usb_tether_loop uses it only when no system adb is found.
+# Kept out of git (companion/adb/ is gitignored); to rebuild from a clean
+# checkout, copy adb.exe, AdbWinApi.dll, AdbWinUsbApi.dll, libwinpthread-1.dll
+# and NOTICE.txt from any Android SDK platform-tools folder into companion/adb/.
+if os.path.isfile(os.path.join('adb', 'adb.exe')):
+    datas += [('adb', 'adb')]
+else:
+    print('\n*** WARNING: companion/adb/adb.exe not found — this build will NOT be '
+          'able to use USB on a machine without the Android SDK installed. ***\n')
+
 hiddenimports += [
     'uvicorn.logging',
     'uvicorn.loops',

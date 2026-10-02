@@ -24,8 +24,10 @@ from typing import List, Optional
 
 import pairing
 
-PORT = 9760
-APP_VERSION = "1.0.8"
+# Overridable so a second copy can run alongside one that's already holding
+# 9760 (a dev instance, or testing a new build) without a port clash.
+PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
+APP_VERSION = "1.0.9"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -863,12 +865,50 @@ def check_for_update_now_for_tray() -> dict:
 # launch and falls back to the saved Wi-Fi host if nothing answers there, so
 # the whole "use USB if available" behavior needs nothing from the user here
 # beyond accepting the one-time "Allow USB debugging?" prompt on the phone.
-_usb_tether_active = False
+# A machine with no Android SDK still works: Google's adb ships inside the exe
+# (see companion.spec) and is used when no system adb is found.
+#
+# _usb_status is what the tray shows. It always says WHY USB isn't working
+# (no adb / no device / prompt not accepted yet / ...) because a silent
+# "nothing happens" is indistinguishable from a bad cable or a missing driver.
+_usb_status = {"state": "starting", "message": ""}
 
-def _find_adb() -> str:
-    """Path to adb.exe, trying PATH first then common Android SDK install
-    locations. Returns the bare command name as a last resort (fails loud
-    with FileNotFoundError if truly absent, which callers already handle)."""
+# adb.exe plus the two DLLs it loads at runtime to talk to Android devices
+# over USB on Windows, and Google's license notice that goes with the binary.
+_ADB_FILES = ("adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "libwinpthread-1.dll", "NOTICE.txt")
+
+def _bundled_adb() -> Optional[str]:
+    """adb shipped inside the exe, for machines with no Android SDK. Runs from
+    a persistent per-user folder rather than the PyInstaller temp dir: adb
+    leaves its server daemon running after this app exits, and a daemon whose
+    exe sits in the temp dir would stop PyInstaller deleting that dir at exit
+    (and be at a new path every launch). Files are copied only when missing or
+    a different size — an adb.exe still held open by a daemon from an earlier
+    launch just keeps being used as-is."""
+    import shutil
+    src = _bundled("adb")
+    if not os.path.isfile(os.path.join(src, "adb.exe")):
+        return None
+    dest = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "GeniusSetListMobile", "adb")
+    try:
+        os.makedirs(dest, exist_ok=True)
+    except OSError:
+        return None
+    for name in _ADB_FILES:
+        s, d = os.path.join(src, name), os.path.join(dest, name)
+        try:
+            if os.path.isfile(s) and (not os.path.isfile(d) or os.path.getsize(d) != os.path.getsize(s)):
+                shutil.copy2(s, d)
+        except OSError:
+            pass
+    adb = os.path.join(dest, "adb.exe")
+    return adb if os.path.isfile(adb) else None
+
+def _find_adb() -> Optional[str]:
+    """A system adb first (PATH, then common Android SDK locations) so this app
+    never fights an existing adb server of a different version — adb kills and
+    restarts any server whose version doesn't match the client's. Falls back
+    to the copy bundled in the exe; None means adb is genuinely unavailable."""
     import shutil
     found = shutil.which("adb")
     if found:
@@ -885,9 +925,13 @@ def _find_adb() -> str:
     for c in candidates:
         if os.path.isfile(c):
             return c
-    return "adb"
+    return _bundled_adb()
 
-_adb_server_started = False
+_adb_server_started_for = None
+
+# The frozen exe has no console, so every console child (adb, netsh) would
+# otherwise get its own flashing terminal window.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 def _ensure_adb_server(adb: str):
     """Starting the adb server for the first time via a captured-output call
@@ -899,49 +943,73 @@ def _ensure_adb_server(adb: str):
     its own first, fully detached and with output thrown away rather than
     piped, avoids creating that stuck pipe in the first place; every call
     after this one is a fast client→already-running-server round trip."""
-    global _adb_server_started
-    if _adb_server_started:
+    global _adb_server_started_for
+    if _adb_server_started_for == adb:
         return
     try:
-        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        creationflags = _NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         subprocess.Popen([adb, "start-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                           stdin=subprocess.DEVNULL, creationflags=creationflags)
         time.sleep(1)  # give the server a moment to actually come up
     except Exception:
         pass
-    _adb_server_started = True
+    _adb_server_started_for = adb
 
-def _authorized_usb_devices(adb: str) -> list:
-    """adb device ids in state 'device' (authorized and ready) — excludes
-    'unauthorized' (debugging prompt not yet accepted on the phone) and
-    'offline', which `adb reverse` can't use anyway."""
-    try:
-        r = subprocess.run([adb, "devices"], capture_output=True, text=True, timeout=5)
-        return [line.split("\t")[0] for line in r.stdout.strip().split("\n")[1:]
-                if line.strip() and "\tdevice" in line]
-    except Exception:
-        return []
+def _adb_devices(adb: str) -> list:
+    """[(serial, state), ...] from `adb devices`. state is 'device' (ready),
+    'unauthorized' (the "Allow USB debugging?" prompt on the phone hasn't been
+    accepted) or 'offline'. Keyed off the tab separator so the daemon-startup
+    chatter adb sometimes prints first can't be mistaken for a device."""
+    r = subprocess.run([adb, "devices"], capture_output=True, text=True, timeout=5,
+                       creationflags=_NO_WINDOW)
+    return [tuple(line.strip().split("\t")[:2]) for line in r.stdout.splitlines() if "\t" in line]
 
 def usb_tether_loop():
-    """Runs for the life of the app. Harmless no-op (adb just isn't found)
-    on a machine without the Android SDK installed."""
-    global _usb_tether_active
-    adb = _find_adb()
-    _ensure_adb_server(adb)
+    """Runs for the life of the app, re-checking every few seconds so a cable
+    plugged in later (or adb appearing later) is picked up without a restart.
+    Tunnels each ready device separately with `-s`: a bare `adb reverse` fails
+    with "more than one device" the moment a phone AND a tablet are both
+    plugged in, which would leave neither one working."""
+    global _usb_status
     while True:
         try:
-            if _authorized_usb_devices(adb):
-                r = subprocess.run([adb, "reverse", f"tcp:{PORT}", f"tcp:{PORT}"],
-                                    capture_output=True, text=True, timeout=5)
-                _usb_tether_active = r.returncode == 0
+            adb = _find_adb()
+            if adb is None:
+                _usb_status = {"state": "no_adb", "message": "USB: adb isn't available on this PC"}
             else:
-                _usb_tether_active = False
-        except Exception:
-            _usb_tether_active = False
+                _ensure_adb_server(adb)
+                devices = _adb_devices(adb)
+                ready = [serial for serial, state in devices if state == "device"]
+                tunneled, last_error = 0, ""
+                for serial in ready:
+                    r = subprocess.run([adb, "-s", serial, "reverse", f"tcp:{PORT}", f"tcp:{PORT}"],
+                                        capture_output=True, text=True, timeout=5,
+                                        creationflags=_NO_WINDOW)
+                    if r.returncode == 0:
+                        tunneled += 1
+                    else:
+                        last_error = (r.stderr or r.stdout).strip()
+                if tunneled:
+                    _usb_status = {"state": "active", "message":
+                                   f"⚡ USB tether active — {tunneled} device{'s' if tunneled != 1 else ''} connected over the cable"}
+                elif ready:
+                    _usb_status = {"state": "error", "message":
+                                   f"USB: couldn't set up the tunnel ({last_error or 'unknown error'})"}
+                elif any(state == "unauthorized" for _, state in devices):
+                    _usb_status = {"state": "unauthorized", "message":
+                                   "USB: device found — tap \"Allow USB debugging\" on its screen"}
+                elif devices:
+                    _usb_status = {"state": "offline", "message":
+                                   "USB: device is offline — unplug and replug the cable"}
+                else:
+                    _usb_status = {"state": "no_device", "message":
+                                   "USB: no phone or tablet detected (cable, USB debugging, or driver)"}
+        except Exception as e:
+            _usb_status = {"state": "error", "message": f"USB: adb check failed ({e})"}
         time.sleep(5)
 
 def get_usb_status_for_tray() -> dict:
-    return {"active": _usb_tether_active}
+    return dict(_usb_status)
 
 def get_status_for_tray() -> dict:
     connected = bridge_connected()
@@ -1033,7 +1101,7 @@ def _firewall_rule_exists() -> bool:
     try:
         r = subprocess.run(
             ["netsh", "advfirewall", "firewall", "show", "rule", f"name={FIREWALL_RULE_NAME}"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW,
         )
         return "No rules match" not in r.stdout
     except Exception:
