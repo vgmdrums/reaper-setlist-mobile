@@ -10,7 +10,7 @@ import java.net.InetAddress
 private const val DISCOVERY_PORT = 47823
 
 /**
- * Finds the companion by pairing phrase instead of scanning its QR code.
+ * Finds the companion on the Wi-Fi network by its pairing phrase.
  * Broadcasts {"discover": "<phrase>"} on the Wi-Fi network; the companion's
  * UDP listener (main.py: start_discovery_server) replies with the real
  * {host, port, token} only if the phrase matches — the phrase itself is

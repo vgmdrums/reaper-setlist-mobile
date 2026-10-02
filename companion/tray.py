@@ -3,20 +3,18 @@ System tray shell for the Genius SetList Mobile companion.
 
 Runs the pystray icon on a background thread; a persistent hidden Tk root
 runs on the main thread so the on-demand status window (REAPER connection
-status, connected phones, pairing QR code) can be created safely via
+status, connected phones, pairing phrase) can be created safely via
 root.after() regardless of which thread the tray menu click came from.
 """
-import io
-import json
 import os
 import sys
 import threading
 import tkinter as tk
 import webbrowser
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 import pystray
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw
 
 
 def _bundled(filename):
@@ -50,16 +48,19 @@ def _load_icon() -> Image.Image:
 
 
 class TrayApp:
-    def __init__(self, get_status_fn, get_clients_fn, get_pairing_fn, get_local_url_fn, get_update_fn, check_update_fn,
-                 get_usb_fn, get_phrase_fn, set_phrase_fn, set_admin_fn, set_transport_control_fn, remove_device_fn, on_quit):
+    def __init__(self, get_status_fn, get_clients_fn, get_network_error_fn, get_local_url_fn, get_update_fn, check_update_fn,
+                 get_usb_fn, get_sheet_folder_fn, set_sheet_folder_fn, get_phrase_fn, set_phrase_fn, set_admin_fn,
+                 set_transport_control_fn, remove_device_fn, on_quit):
         """
         get_status_fn()  -> {"reaper_connected": bool, "current_project": str|None}
         get_clients_fn() -> [{"label", "device_id", "is_admin", "can_control", "online", "last_seen"}, ...]
-        get_pairing_fn() -> {"ok": bool, "payload": {host,port,token}|None, "error": str|None}
+        get_network_error_fn() -> str ("" when this PC has a LAN address; else why phones can't find it by phrase)
         get_local_url_fn() -> str (Plan B — opens the app on this PC via localhost)
         get_update_fn()  -> {"current_version": str, "update": {"version","url"}|None} (cached, instant)
         check_update_fn() -> same shape plus "checked_ok": bool -- blocking network call, run off the Tk thread
         get_usb_fn()     -> {"state": str, "message": str} -- what the USB tether is doing right now, and why not if it isn't
+        get_sheet_folder_fn() -> str (the default sheet-music folder, "" if none)
+        set_sheet_folder_fn(path: str) -- saves it ("" clears it)
         get_phrase_fn()  -> str (current pairing phrase)
         set_phrase_fn(phrase: str) -> str (normalized phrase actually saved)
         set_admin_fn(device_id: str, is_admin: bool) -- grants/revokes Edit-mode access for this device
@@ -69,11 +70,13 @@ class TrayApp:
         """
         self.get_status = get_status_fn
         self.get_clients = get_clients_fn
-        self.get_pairing = get_pairing_fn
+        self.get_network_error = get_network_error_fn
         self.get_local_url = get_local_url_fn
         self.get_update = get_update_fn
         self.check_update = check_update_fn
         self.get_usb = get_usb_fn
+        self.get_sheet_folder = get_sheet_folder_fn
+        self.set_sheet_folder = set_sheet_folder_fn
         self.get_phrase = get_phrase_fn
         self.set_phrase = set_phrase_fn
         self.set_admin = set_admin_fn
@@ -100,11 +103,10 @@ class TrayApp:
             except tk.TclError:
                 pass
         self._status_win = None
-        self._qr_photo = None  # keep a reference so Tk doesn't garbage-collect it
         self._last_refresh_key = None
         self._auto_refresh_running = False
 
-        show_status_item = pystray.MenuItem("Show status && pairing QR", self._show_status, default=True)
+        show_status_item = pystray.MenuItem("Show status && pairing phrase", self._show_status, default=True)
         self.icon = pystray.Icon(
             "genius_setlist_mobile",
             _load_icon(),
@@ -173,7 +175,7 @@ class TrayApp:
 
         status = self.get_status()
         clients = self.get_clients()
-        pairing = self.get_pairing()
+        network_error = self.get_network_error()
         update = self.get_update()
         usb = self.get_usb()
         self._last_refresh_key = self._screen_key(clients, usb, status)
@@ -256,6 +258,21 @@ class TrayApp:
         tk.Label(win, text="Use this if your phone loses connection mid-show",
                  font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack()
 
+        # Where the sheet-music PDFs live. Charts are also looked for next to the
+        # open REAPER project, but one fixed folder is the usual home for them.
+        sheet_folder = self.get_sheet_folder()
+        tk.Label(win, text="Default sheet music folder", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
+        tk.Label(win, text=sheet_folder or "Not set — only the REAPER project's own folder is searched",
+                 font=("Segoe UI", 8), bg=BG, fg=FG if sheet_folder else FG_DIM, wraplength=380,
+                 justify="center").pack(padx=16)
+        folder_row = tk.Frame(win, bg=BG)
+        folder_row.pack(pady=(6, 0))
+        tk.Button(folder_row, text="Choose folder…", command=self._choose_sheet_folder,
+                  bg=BG2, fg=FG, activebackground=BG2, activeforeground=FG, relief="flat").pack(side="left", padx=4)
+        if sheet_folder:
+            tk.Button(folder_row, text="Clear", command=self._clear_sheet_folder,
+                      bg=BG2, fg=FG_DIM, activebackground=BG2, activeforeground=FG, relief="flat").pack(side="left", padx=4)
+
         tk.Label(win, text="Devices", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
         tk.Label(win, text="Admin edits setlists. Performer controls playback in Stage view but\n"
                             "can't edit. View Only can just watch. Every device that's ever\n"
@@ -298,14 +315,11 @@ class TrayApp:
         else:
             tk.Label(win, text="(none yet)", bg=BG, fg=FG_DIM).pack()
 
-        # Phrase goes first and has no dependency on the QR/network code path
-        # below — it's just a locally-stored string, always available, so it
-        # renders even if QR generation (network lookup + the qrcode lib)
-        # fails for some reason. That ordering is deliberate: an exception in
-        # _render_qr used to silently abort everything after it, including
-        # this section and the buttons at the bottom.
-        tk.Label(win, text="Or type this phrase in the app", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
-        tk.Label(win, text="Both devices must be on the same Wi-Fi", font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack()
+        # The pairing phrase is the only way a phone pairs over Wi-Fi: the app
+        # broadcasts it and this PC answers (see start_discovery_server in main.py).
+        tk.Label(win, text="Pairing phrase", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
+        tk.Label(win, text="Type this in the app on your phone.\nBoth devices must be on the same Wi-Fi.",
+                 font=("Segoe UI", 8), bg=BG, fg=FG_DIM, justify="center").pack()
         phrase_row = tk.Frame(win, bg=BG)
         phrase_row.pack(pady=(6, 0))
         self._phrase_entry = tk.Entry(phrase_row, font=("Consolas", 12), justify="center", width=18,
@@ -317,15 +331,9 @@ class TrayApp:
         self._phrase_status_label = tk.Label(win, text="", font=("Segoe UI", 8), bg=BG, fg=FG)
         self._phrase_status_label.pack()
 
-        tk.Label(win, text="Or scan this QR code", font=("Segoe UI", 11, "bold"), bg=BG, fg=FG).pack(pady=(14, 2))
-        if pairing["ok"]:
-            try:
-                self._render_qr(win, pairing["payload"])
-            except Exception as e:
-                tk.Label(win, text=f"QR code unavailable: {e}", wraplength=300, bg=BG, fg="#ff6b6b",
-                         justify="left").pack(padx=16)
-        else:
-            tk.Label(win, text=pairing["error"], wraplength=300, bg=BG, fg="#ff6b6b", justify="left").pack(padx=16)
+        # With no LAN address a phone can't find this PC by phrase either — say so.
+        if network_error:
+            tk.Label(win, text=network_error, wraplength=300, bg=BG, fg="#ff6b6b", justify="left").pack(padx=16, pady=(6, 0))
 
         btns = tk.Frame(win, bg=BG)
         btns.pack(pady=14)
@@ -400,6 +408,20 @@ class TrayApp:
         self.set_transport_control(device_id, role in ("admin", "performer"))
         self._refresh_status_window()
 
+    def _choose_sheet_folder(self):
+        current = self.get_sheet_folder()
+        chosen = filedialog.askdirectory(
+            parent=self._status_win, mustexist=True,
+            title="Choose the folder that holds your sheet music PDFs",
+            initialdir=current if current and os.path.isdir(current) else os.path.expanduser("~"))
+        if chosen:   # "" means the dialog was cancelled
+            self.set_sheet_folder(os.path.normpath(chosen))
+            self._refresh_status_window()
+
+    def _clear_sheet_folder(self):
+        self.set_sheet_folder("")
+        self._refresh_status_window()
+
     def _open_local(self):
         webbrowser.open(self.get_local_url())
 
@@ -455,16 +477,6 @@ class TrayApp:
         if self._phrase_status_label is not None:
             self._phrase_status_label.config(text="Saved", fg="#3ecf6e")
             self._phrase_status_label.after(1500, lambda: self._phrase_status_label.config(text=""))
-
-    def _render_qr(self, win, payload):
-        import qrcode
-        buf = io.BytesIO()
-        qrcode.make(json.dumps(payload)).save(buf, format="PNG")
-        buf.seek(0)
-        img = Image.open(buf).resize((200, 200))
-        self._qr_photo = ImageTk.PhotoImage(img)
-        tk.Label(win, image=self._qr_photo, bg=BG).pack(pady=4)
-        tk.Label(win, text=f"{payload['host']}:{payload['port']}", font=("Consolas", 9), bg=BG, fg=FG_DIM).pack()
 
     def _quit(self, icon=None, item=None):
         self.icon.stop()

@@ -1611,6 +1611,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
    3-column desktop Stage view (song list + big clock + VU sidebar), which
    assumes a wide monitor and doesn't fit a phone screen at all. */
 .mstage {
+  position: relative;   /* the chart viewer fills this, leaving the transport bar below it usable */
   flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg);
   min-height: 0;
 }
@@ -1717,7 +1718,27 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .mstage-sheet-btn:active { background: var(--green); color: #fff; }
 
 /* ── Sheet music viewer (full-screen PDF chart, rendered to PNG by the companion) ── */
-.sheet-viewer { position: fixed; inset: 0; z-index: 200; background: #0a0a0c; display: flex; flex-direction: column; }
+.sheet-viewer { position: absolute; inset: 0; z-index: 20; background: #0a0a0c; display: flex; flex-direction: column; }
+.sheet-viewer-tabs { flex-shrink: 0; display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; background: var(--bg2); border-bottom: 1px solid var(--border); }
+.sheet-viewer-tab {
+  flex-shrink: 0; padding: 8px 18px; min-height: 40px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border2); background: var(--bg3); color: var(--text2);
+  font-family: var(--mono); font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+}
+.sheet-viewer-tab.on { border-color: var(--green); background: rgba(46,204,113,.15); color: var(--green); }
+.sheet-viewer-next {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+  background: var(--bg2); border-top: 1px solid var(--border);
+}
+.sheet-viewer-next-lbl { font-size: 11px; letter-spacing: 2.5px; font-weight: 700; color: var(--text2); }
+.sheet-viewer-next-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 700; }
+
+/* ── Settings (per device) ── */
+.settings-section-title { font-family: var(--mono); font-size: 11px; letter-spacing: .18em; color: var(--text2); margin-top: 6px; }
+.settings-subtitle { font-size: 13px; color: var(--text2); margin-top: 4px; }
+.settings-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+.settings-check { display: flex; align-items: center; gap: 12px; min-height: 40px; font-size: 16px; text-transform: capitalize; cursor: pointer; }
+.settings-check input { width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--green); }
 .sheet-viewer-hdr {
   flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px;
   background: var(--bg2); border-bottom: 1px solid var(--border);
@@ -1749,12 +1770,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 }
 .mstage-identity-text { font-size: 10px; letter-spacing: .05em; color: var(--text3); }
 .mstage-view-only { color: var(--yellow); font-weight: 700; }
-.mstage-hotkeys-btn {
+.mstage-settings-btn {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
   background: none; border: none; color: var(--text3); font-size: 15px;
   cursor: pointer; padding: 4px 8px; line-height: 1;
 }
-.mstage-hotkeys-btn:hover { color: var(--text); }
+.mstage-settings-btn:hover { color: var(--text); }
 
 /* ── Hotkey settings (per-device, Stage view) ── */
 .hotkey-list { display: flex; flex-direction: column; gap: 6px; }

@@ -28,7 +28,7 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.15"
+APP_VERSION = "1.0.16"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -176,8 +176,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-# Pairing (host/port/token) is handed to the phone once via a QR code the tray
-# app displays — there is no unauthenticated endpoint that reveals the token.
+# Pairing (host/port/token) is handed to the phone once, in answer to the pairing
+# phrase the tray app displays (see start_discovery_server) — there is no
+# unauthenticated Wi-Fi-reachable endpoint that reveals the token.
 # Every real API route (REST + WS) requires it; the static app shell (index
 # .html/js/css/manifest) does not, since it carries no data and the WebView's
 # very first navigation is a plain GET with the token only in the query string.
@@ -515,7 +516,7 @@ def sheet_music_list():
     if not bridge_connected():
         return {"folder": "", "sheets": [], "unmatched": [], "reason": "REAPER isn't connected"}
     state = read_bridge_state()
-    return sheets.list_sheets(state.get("proj_path") or "", state.get("regions") or [])
+    return sheets.list_sheets(state.get("proj_path") or "", state.get("regions") or [], pairing.get_sheet_folder())
 
 @api.get("/sheet-music/page")
 def sheet_music_page(file: str, n: int = 0, scale: float = 2.0):
@@ -523,7 +524,7 @@ def sheet_music_page(file: str, n: int = 0, scale: float = 2.0):
     Authorization header, since an <img> tag can't send headers."""
     if not bridge_connected():
         raise HTTPException(409, "REAPER isn't connected")
-    path = sheets.resolve(read_bridge_state().get("proj_path") or "", file)
+    path = sheets.resolve(read_bridge_state().get("proj_path") or "", pairing.get_sheet_folder(), file)
     if path is None:
         raise HTTPException(404, "No such chart")
     try:
@@ -676,12 +677,12 @@ def _bundled(filename):
         return os.path.join(sys._MEIPASS, filename)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
 
-# ── USB pairing (no QR, no phrase) ────────────────────────────────────────────
+# ── USB pairing (no phrase needed) ────────────────────────────────────────────
 # A phone plugged in with USB debugging already has a tunnel to this PC (see
 # usb_tether_loop), so it can ask for its pairing info directly instead of
-# scanning a code. This hands out the token, so it's deliberately narrow:
+# typing a phrase. This hands out the token, so it's deliberately narrow:
 #  * only loopback callers — the tunnel reaches us as 127.0.0.1, a phone on the
-#    Wi-Fi arrives from its own address and is refused (it still pairs by QR/phrase);
+#    Wi-Fi arrives from its own address and is refused (it still pairs by phrase);
 #  * never anything carrying a browser's Origin / Sec-Fetch-* headers — a web
 #    page open on this PC can reach 127.0.0.1 too, and CORS here is wide open,
 #    so refusing browser-originated requests is what keeps it from reading this;
@@ -1126,14 +1127,23 @@ def project_watch_loop(notify):
             pass  # a bad read this round just means checking again next round
         time.sleep(PROJECT_WATCH_INTERVAL)
 
+def get_sheet_folder_for_tray() -> str:
+    return pairing.get_sheet_folder()
+
+def set_sheet_folder_for_tray(path: str):
+    """Only a folder that exists is kept; "" clears the setting."""
+    pairing.set_sheet_folder(path if path and os.path.isdir(path) else "")
+
 def get_status_for_tray() -> dict:
     connected = bridge_connected()
     state = read_bridge_state() if connected else {}
     return {"reaper_connected": connected, "current_project": state.get("proj_name") or state.get("proj_path"),
             "project_mismatch": get_project_mismatch() if connected else None}
 
-def get_pairing_for_tray() -> dict:
-    return pairing.build_pairing_payload(PORT)
+def get_network_error_for_tray() -> str:
+    """"" when this PC has a LAN address; otherwise why a phone can't find it."""
+    addr = pairing.get_local_ip()
+    return "" if addr["ok"] else addr["error"]
 
 def get_local_url_for_tray() -> str:
     """The tray's "Plan B" link: opens this same app directly on this PC via
@@ -1334,11 +1344,13 @@ if __name__ == "__main__":
     tray_app = TrayApp(
         get_status_fn=get_status_for_tray,
         get_clients_fn=get_clients_for_tray,
-        get_pairing_fn=get_pairing_for_tray,
+        get_network_error_fn=get_network_error_for_tray,
         get_local_url_fn=get_local_url_for_tray,
         get_update_fn=get_update_for_tray,
         check_update_fn=check_for_update_now_for_tray,
         get_usb_fn=get_usb_status_for_tray,
+        get_sheet_folder_fn=get_sheet_folder_for_tray,
+        set_sheet_folder_fn=set_sheet_folder_for_tray,
         get_phrase_fn=get_phrase_for_tray,
         set_phrase_fn=set_phrase_for_tray,
         set_admin_fn=set_admin_for_tray,

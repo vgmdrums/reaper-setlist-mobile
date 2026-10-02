@@ -13,21 +13,13 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 /**
- * First-run (and re-pair) screen. Three ways in:
- *  1. Scan the tray app's QR code — encodes {"host","port","token"} directly
- *     (see companion/pairing.py's build_pairing_payload()).
- *  2. Type the stable pairing phrase shown in the tray app — this app
- *     broadcasts it on the Wi-Fi network via DiscoveryClient and the
- *     companion answers with the real host/port/token.
- *  3. Paste the raw QR JSON by hand, for when the camera can't be used.
- * The manual field accepts either a phrase or JSON and figures out which.
+ * First-run (and re-pair) screen. Over Wi-Fi the only way in is the stable
+ * pairing phrase shown in the tray app: this app broadcasts it on the network
+ * via DiscoveryClient and the companion answers with the real host/port/token.
  *
  * Plugged in over USB (debugging authorized, companion running), none of that
  * is needed: this is the launcher activity, so on every launch it checks for
@@ -44,10 +36,6 @@ class PairingActivity : AppCompatActivity() {
 
     // The companion's pairing info, while a USB tunnel to it is up (else null).
     private var usbPairing: PairingInfo? = null
-
-    private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
-        result.contents?.let { handlePairingText(it) }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,15 +88,6 @@ class PairingActivity : AppCompatActivity() {
             usbPairing?.let { savePairingAndStart(it) }
         }
 
-        findViewById<Button>(R.id.scanButton).setOnClickListener {
-            if (requireDeviceName() == null) return@setOnClickListener
-            scanLauncher.launch(ScanOptions().apply {
-                setPrompt(getString(R.string.scan_qr))
-                setBeepEnabled(false)
-                setOrientationLocked(true)
-            })
-        }
-
         findViewById<Button>(R.id.connectButton).setOnClickListener {
             if (requireDeviceName() == null) return@setOnClickListener
             val raw = findViewById<EditText>(R.id.manualInput).text.toString()
@@ -138,15 +117,7 @@ class PairingActivity : AppCompatActivity() {
             lifecycleScope.launch { PairingStore.saveLastManualInput(this@PairingActivity, trimmed) }
         }
 
-        val fromJson = parsePairingPayload(trimmed)
-        if (fromJson != null) {
-            errorText.visibility = View.GONE
-            savePairingAndStart(fromJson)
-            return
-        }
-
-        // Not JSON — treat it as a pairing phrase and try to discover the
-        // companion on the local Wi-Fi network.
+        // Look for the companion on the local Wi-Fi network by its phrase.
         if (trimmed.isEmpty()) {
             showError(errorText, getString(R.string.pairing_error_invalid))
             return
@@ -178,19 +149,6 @@ class PairingActivity : AppCompatActivity() {
     private fun showError(errorText: TextView, message: String) {
         errorText.text = message
         errorText.visibility = View.VISIBLE
-    }
-
-    private fun parsePairingPayload(raw: String): PairingInfo? {
-        return try {
-            val json = JSONObject(raw)
-            PairingInfo(
-                host = json.getString("host"),
-                port = json.getInt("port"),
-                token = json.getString("token"),
-            )
-        } catch (e: Exception) {
-            null
-        }
     }
 
     private fun startMain() {

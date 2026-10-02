@@ -18,7 +18,7 @@ object UsbLink {
 
     /**
      * The pairing info the companion hands to a phone on the other end of its
-     * USB tunnel — the same host/port/token a QR code carries — or null when
+     * USB tunnel — the same host/port/token a pairing phrase finds — or null when
      * there's no tunnel (or an older companion without /usb-pair). `host` in
      * the result is the PC's LAN address: what to fall back to when the cable
      * comes out. The connection itself should use 127.0.0.1.

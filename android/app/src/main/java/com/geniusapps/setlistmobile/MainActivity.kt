@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.graphics.Bitmap
+import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -62,13 +64,30 @@ class MainActivity : AppCompatActivity() {
         // — and a stale copy of the page is how a phone ends up running an old UI
         // (e.g. missing a feature) long after the companion was updated.
         webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        val menuButton = findViewById<ImageButton>(R.id.menuButton)
         webView.webViewClient = object : WebViewClient() {
+            // A page that hid the menu (the sheet-music viewer) mustn't leave it hidden after a reload.
+            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                menuButton.visibility = View.VISIBLE
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 spinner.visibility = View.GONE
             }
         }
+        // The web app hides this overlay menu while a sheet-music chart is open: it
+        // sits exactly where the chart viewer's close button is. The only thing
+        // this exposes to the page is showing/hiding that one button, and the
+        // WebView only ever loads the paired companion's own pages.
+        webView.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun setMenuVisible(visible: Boolean) {
+                runOnUiThread { menuButton.visibility = if (visible) View.VISIBLE else View.GONE }
+            }
+        }, "GeniusAndroid")
 
-        findViewById<ImageButton>(R.id.menuButton).setOnClickListener { anchor ->
+        menuButton.setOnClickListener { anchor ->
             PopupMenu(this, anchor).apply {
                 menuInflater.inflate(R.menu.main_menu, menu)
                 // Title reflects current state rather than relying on a
@@ -115,7 +134,7 @@ class MainActivity : AppCompatActivity() {
             // plugged in with USB debugging authorized (see main.py's
             // usb_tether_loop), so 127.0.0.1 on THIS phone reaches the PC on
             // the other end of the cable — and that PC will hand us its own
-            // pairing info there. So a phone on a cable needs no QR code or
+            // pairing info there. So a phone on a cable needs no
             // phrase, and one moved to a different computer simply follows
             // the cable: the info is saved over whatever it had, keeping the
             // PC's LAN address as the fallback for when the cable comes out.

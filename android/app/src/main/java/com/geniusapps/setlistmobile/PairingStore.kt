@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.map
 
 private val Context.pairingDataStore: DataStore<Preferences> by preferencesDataStore(name = "pairing")
 
-/** host/port/token scanned from the tray app's QR code — see companion/pairing.py. */
+/** host/port/token the companion answers a pairing phrase (or a USB connection) with. */
 data class PairingInfo(val host: String, val port: Int, val token: String) {
     fun baseUrl() = "http://$host:$port/"
 }

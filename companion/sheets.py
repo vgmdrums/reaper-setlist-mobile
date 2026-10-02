@@ -130,50 +130,76 @@ def page_count(path: str) -> int:
     return _pages_cache[key]
 
 
-def list_sheets(project_path: str, regions: list) -> dict:
-    """{"folder", "sheets": [{"file", "name", "type", "pages", "region_names"}], "unmatched": [file names]}.
-    `file` is the path relative to the project folder (forward slashes), which
-    is all the page endpoint needs to find it again. `type` is the sheet type
-    from "{region} - {type}.pdf" ("" for a file named exactly like the region).
+def _roots(project_path: str, default_folder: str) -> list:
+    """[(id, folder), ...] to search: the REAPER project's own folder first (the
+    more specific place), then the default sheet-music folder chosen in the tray."""
+    roots = []
+    project_folder = os.path.dirname(project_path) if project_path else ""
+    if project_folder:
+        roots.append(("project", project_folder))
+    if default_folder and os.path.isdir(default_folder):
+        roots.append(("default", default_folder))
+    return roots
+
+
+def list_sheets(project_path: str, regions: list, default_folder: str = "") -> dict:
+    """{"folder", "default_folder", "sheets": [{"file", "name", "type", "pages", "region_names"}], "unmatched": [file names]}.
+    `file` is "project:<path>" or "default:<path>" — which folder it's in, then
+    its path relative to that folder (forward slashes) — which is all the page
+    endpoint needs to find it again. `type` is the sheet type from
+    "{region} - {type}.pdf" ("" for a file named exactly like the region).
     Sheets come back ordered by type, so a song's options always appear in the
-    same order. `unmatched` is every PDF that named no region — worth showing,
-    since 'why isn't my chart showing up' is almost always a name that doesn't
-    line up."""
-    folder = os.path.dirname(project_path) if project_path else ""
-    if not folder:
-        return {"folder": "", "sheets": [], "unmatched": []}
-    sheets, unmatched = [], []
-    for path in find_pdfs(folder):
-        base = os.path.basename(path)
-        matched = match_file(base, regions)
-        if not matched:
-            unmatched.append(base)
-            continue
-        try:
-            pages = page_count(path)
-        except Exception:
-            unmatched.append(base)   # unreadable / not really a PDF
-            continue
-        region_names, sheet_type = matched
-        sheets.append({
-            "file": os.path.relpath(path, folder).replace("\\", "/"),
-            "name": base,
-            "type": sheet_type,
-            "pages": pages,
-            "region_names": region_names,
-        })
+    same order. A file name found in both folders is listed once, from the
+    project's (closer) copy. `unmatched` is every PDF that named no region —
+    worth showing, since 'why isn't my chart showing up' is almost always a
+    name that doesn't line up."""
+    roots = _roots(project_path, default_folder)
+    if not roots:
+        return {"folder": "", "default_folder": default_folder or "", "sheets": [], "unmatched": []}
+    sheets, unmatched, seen = [], [], set()
+    for root_id, folder in roots:
+        for path in find_pdfs(folder):
+            base = os.path.basename(path)
+            if base.casefold() in seen:
+                continue            # same file name already found in a closer folder
+            seen.add(base.casefold())
+            matched = match_file(base, regions)
+            if not matched:
+                unmatched.append(base)
+                continue
+            try:
+                pages = page_count(path)
+            except Exception:
+                unmatched.append(base)   # unreadable / not really a PDF
+                continue
+            region_names, sheet_type = matched
+            sheets.append({
+                "file": f"{root_id}:" + os.path.relpath(path, folder).replace("\\", "/"),
+                "name": base,
+                "type": sheet_type,
+                "pages": pages,
+                "region_names": region_names,
+            })
     sheets.sort(key=lambda s: (s["type"].casefold(), s["name"].casefold()))
-    return {"folder": folder, "sheets": sheets, "unmatched": unmatched}
+    return {"folder": os.path.dirname(project_path) if project_path else "",
+            "default_folder": default_folder or "", "sheets": sheets, "unmatched": unmatched}
 
 
-def resolve(project_path: str, rel_file: str):
+def resolve(project_path: str, default_folder: str, file_id: str):
     """The real path for a `file` from list_sheets(), or None. Refuses anything
-    that isn't a .pdf inside the project folder — this is reachable from the
-    network, so a crafted '../..' must not read arbitrary files."""
-    folder = os.path.dirname(project_path) if project_path else ""
-    if not folder or not rel_file or not rel_file.lower().endswith(".pdf"):
+    that isn't a .pdf inside one of the two search folders — this is reachable
+    from the network, so a crafted '../..' must not read arbitrary files. An id
+    with no "project:"/"default:" prefix (a page loaded before this existed)
+    is read as relative to the project folder."""
+    if not file_id or not file_id.lower().endswith(".pdf"):
         return None
-    path = os.path.normpath(os.path.join(folder, rel_file))
+    root_id, _, rel = file_id.partition(":")
+    if root_id not in ("project", "default") or not rel:
+        root_id, rel = "project", file_id
+    folder = dict(_roots(project_path, default_folder)).get(root_id)
+    if not folder:
+        return None
+    path = os.path.normpath(os.path.join(folder, rel))
     try:
         inside = os.path.commonpath([os.path.normcase(folder), os.path.normcase(path)]) == os.path.normcase(os.path.normpath(folder))
     except ValueError:  # different drives

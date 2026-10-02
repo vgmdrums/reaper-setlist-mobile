@@ -957,23 +957,40 @@ function VUMeter({ label, level: externalLevel }) {
 // desktop view — this only changes what gets rendered and how it's tapped.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// SheetViewer — a PDF chart named after a region, shown full-screen. The
-// companion renders each page to a PNG (Android's WebView has no PDF viewer),
-// so this is just images; the +/- buttons widen them past the screen and the
-// body scrolls sideways, which works the same on any device (pinch-zoom isn't
-// dependable inside a WebView).
+// Sheet music — PDF charts named "{region} - {type}.pdf" (see companion/sheets.py).
+// The companion renders each page to a PNG (Android's WebView has no PDF
+// viewer), so the viewer is just images; the +/- buttons widen them past the
+// screen and the body scrolls sideways, which works the same on any device
+// (pinch-zoom isn't dependable inside a WebView).
 // ─────────────────────────────────────────────────────────────────────────────
 const SHEET_ZOOMS = [1, 1.5, 2, 3];
+const SHEET_PREFS_KEY = "stageSheetPrefs";
+// Types the Settings checkboxes always offer; any other type found in the
+// project's PDFs (say "piano") is offered too.
+const SHEET_TYPE_DEFAULTS = ["drums", "guitar", "lyrics", "bass"];
 
-// "Bowling For Soup - 1985 · Drums" — the sheet type comes from the file name
-// ("... - drums.pdf"), so tidy its capitalization for the title.
-function sheetTitle(song, sheet) {
-  const type = (sheet.type || "").trim();
-  return type ? `${song} · ${type.charAt(0).toUpperCase()}${type.slice(1)}` : song;
+// Per-device, like the hotkeys: { auto: show a song's chart when it starts
+// playing, types: the sheet types this device prefers }.
+function loadSheetPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(SHEET_PREFS_KEY) || "{}");
+    return { auto: !!p.auto, types: Array.isArray(p.types) ? p.types.map(t => String(t).toLowerCase()) : [] };
+  } catch { return { auto: false, types: [] }; }
 }
 
-function SheetViewer({ sheet, title, onClose }) {
+// A song's charts with the preferred types first, in the order Settings lists
+// them; everything else after, in the order the companion sent it.
+function prioritizeSheets(list, typeOptions, preferred) {
+  const order = typeOptions.filter(t => preferred.includes(t));
+  const rank = s => { const i = order.indexOf((s.type || "").toLowerCase()); return i < 0 ? order.length : i; };
+  return [...list].sort((a, b) => rank(a) - rank(b));   // stable: ties keep the companion's order
+}
+
+// Fills the stage area (not the whole screen) so the transport bar underneath
+// stays on screen and usable while a chart is up.
+function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong }) {
   const [zoomIdx, setZoomIdx] = useState(0);
+  const sheet = sheets.find(s => s.file === activeFile) || sheets[0];
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -986,19 +1003,32 @@ function SheetViewer({ sheet, title, onClose }) {
   return (
     <div className="sheet-viewer">
       <div className="sheet-viewer-hdr">
-        <span className="sheet-viewer-title">{title}</span>
+        <span className="sheet-viewer-title">{song}</span>
         <button className="sheet-viewer-btn" disabled={zoomIdx === 0}
           onClick={() => setZoomIdx(i => i - 1)} aria-label="Zoom out">−</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === SHEET_ZOOMS.length - 1}
           onClick={() => setZoomIdx(i => i + 1)} aria-label="Zoom in">+</button>
         <button className="sheet-viewer-btn" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      <div className="sheet-viewer-body">
+      <div className="sheet-viewer-tabs">
+        {sheets.map(t => (
+          <button key={t.file} className={`sheet-viewer-tab${t.file === sheet.file ? " on" : ""}`}
+            onClick={() => onPick(t.file)}>{t.type || "Sheet"}</button>
+        ))}
+      </div>
+      <div className="sheet-viewer-body" key={sheet.file}>
         {Array.from({ length: sheet.pages }, (_, n) => (
-          <img key={n} className="sheet-viewer-page" src={pageSrc(n)} alt={`${title}, page ${n + 1}`}
+          <img key={n} className="sheet-viewer-page" src={pageSrc(n)} alt={`${song}, ${sheet.type || "sheet"}, page ${n + 1}`}
             style={{ width: `${SHEET_ZOOMS[zoomIdx] * 100}%` }} />
         ))}
       </div>
+      {nextSong && (
+        <div className="sheet-viewer-next">
+          <span className="sheet-viewer-next-lbl">NEXT</span>
+          <span className="sheet-viewer-next-name">{nextSong.name}</span>
+          {nextSong.hasSheet && <span className="mstage-flag sheet">SHEET</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1041,11 +1071,29 @@ function MobileStageView({
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
   onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, companionVersion,
 }) {
-  const [viewingSheet, setViewingSheet] = useState(null);
+  const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
+  const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
   // Every chart of a song: the PDFs named "{region} - {type}.pdf" for its region
   // (the companion has already ordered them by type).
   const sheetsFor = name => (name ? sheets.filter(s => s.region_names.includes(name)) : []);
-  const [showHotkeys, setShowHotkeys] = useState(false);
+  // The Settings checkboxes: the usual types plus any other type that's actually there.
+  const sheetTypeOptions = React.useMemo(() => {
+    const extra = [];
+    for (const sh of sheets) {
+      const t = (sh.type || "").toLowerCase();
+      if (t && !SHEET_TYPE_DEFAULTS.includes(t) && !extra.includes(t)) extra.push(t);
+    }
+    return [...SHEET_TYPE_DEFAULTS, ...extra];
+  }, [sheets]);
+  const prioritizedSheetsFor = name => prioritizeSheets(sheetsFor(name), sheetTypeOptions, sheetPrefs.types);
+  function updateSheetPrefs(patch) {
+    setSheetPrefs(prev => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(SHEET_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
+      return next;
+    });
+  }
+  const [showSettings, setShowSettings] = useState(false);
   const [hotkeys, setHotkeys] = useState(loadHotkeys);
   const [listeningFor, setListeningFor] = useState(null);
   const currentPlayingItemId = currentIndex >= 0 ? playbackItems[currentIndex]?.id : null;
@@ -1055,6 +1103,55 @@ function MobileStageView({
   // no child has been picked yet — matches mobile.html's renderPACPanel().
   const showPacPanel = !!(currentPlayingParent?.isFolder && currentPlayingParent?.keycommand
     && isPlaying && currentChildIndex === -1);
+
+  // The song playing right now: the Pick A Cover choice if one was made, else the item itself.
+  const playingLeaf = currentPlayingParent
+    ? (currentChildIndex >= 0 ? currentPlayingParent.children?.[currentChildIndex] : currentPlayingParent)
+    : null;
+  const playingName = playingLeaf ? (getLiveItem(playingLeaf).name || playingLeaf.name || "") : "";
+
+  // "Automatically show sheet music": when a song starts playing — play pressed,
+  // next/prev, or the setlist moving on by itself — open its chart on the
+  // preferred type. With preferences set, only a preferred type is shown (a
+  // drummer asked for drums, not whatever the song happens to have); with none
+  // set, the first chart. A song with nothing suitable closes the viewer, so it
+  // never sits on the previous song's chart. Once per song start (the ref), so
+  // closing the chart mid-song isn't undone by the next refresh.
+  const autoShownRef = useRef(null);
+  useEffect(() => {
+    if (!isPlaying) { autoShownRef.current = null; return; }
+    if (!sheetPrefs.auto || !playingName || sheets.length === 0) return;
+    const key = `${currentIndex}:${currentChildIndex}:${playingName}`;
+    if (autoShownRef.current === key) return;
+    autoShownRef.current = key;
+    const available = prioritizeSheets(sheets.filter(sh => sh.region_names.includes(playingName)), sheetTypeOptions, sheetPrefs.types);
+    const wanted = sheetPrefs.types.length
+      ? available.filter(sh => sheetPrefs.types.includes((sh.type || "").toLowerCase()))
+      : available;
+    setViewing(wanted.length ? { song: playingName, file: wanted[0].file } : null);
+  }, [isPlaying, playingName, currentIndex, currentChildIndex, sheetPrefs, sheets, sheetTypeOptions]);
+
+  const viewerSheets = viewing ? prioritizedSheetsFor(viewing.song) : [];
+  const showViewer = !!viewing && viewerSheets.length > 0;
+  // Charts can vanish under us (folder changed, project switched) — don't leave an empty viewer.
+  useEffect(() => { if (viewing && viewerSheets.length === 0) setViewing(null); });
+
+  // On the Android app, its overlay menu (reload / re-pair / fullscreen) sits
+  // exactly where the viewer's close button is — hide it while a chart is up.
+  // No-op in a browser, where there's no such bridge.
+  useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!showViewer); }, [showViewer]);
+  useEffect(() => () => window.GeniusAndroid?.setMenuVisible?.(true), []);
+
+  // The viewer's "NEXT" line: the song after the one being viewed.
+  const nextForViewer = (() => {
+    if (!showViewer) return null;
+    const idx = playbackItems.findIndex(p => getLiveItem(p).name === viewing.song
+      || (p.isFolder && (p.children || []).some(c => getLiveItem(c).name === viewing.song)));
+    const nxt = idx >= 0 ? playbackItems[idx + 1] : null;
+    if (!nxt) return null;
+    const name = getLiveItem(nxt).name || nxt.name;
+    return { name, hasSheet: sheetsFor(name).length > 0 };
+  })();
 
   // Fires bound actions on keydown. Disabled while capturing a new binding
   // (the effect below owns the keyboard then) and for view-only devices —
@@ -1297,10 +1394,10 @@ function MobileStageView({
           <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
           {sheetsFor(selName).length > 0 && (
             <div className="mstage-sel-sheets">
-              {sheetsFor(selName).map(s => (
-                <button key={s.file} className="mstage-sheet-btn"
-                  onClick={() => setViewingSheet({ sheet: s, title: sheetTitle(selName, s) })}>
-                  {s.type || "Sheet"}
+              {prioritizedSheetsFor(selName).map(sh => (
+                <button key={sh.file} className="mstage-sheet-btn"
+                  onClick={() => setViewing({ song: selName, file: sh.file })}>
+                  {sh.type || "Sheet"}
                 </button>
               ))}
             </div>
@@ -1308,8 +1405,9 @@ function MobileStageView({
         </div>
       )}
 
-      {viewingSheet && (
-        <SheetViewer sheet={viewingSheet.sheet} title={viewingSheet.title} onClose={() => setViewingSheet(null)} />
+      {showViewer && (
+        <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
+          onPick={file => setViewing(v => ({ ...v, file }))} onClose={() => setViewing(null)} nextSong={nextForViewer} />
       )}
 
       {/* So whoever's running the show can glance at a phone and know which
@@ -1319,19 +1417,43 @@ function MobileStageView({
           Connected as {getDeviceLabel()}{!canControl && <span className="mstage-view-only"> · VIEW ONLY</span>}
           {companionVersion && ` · companion v${companionVersion}`}
         </span>
-        {canControl && (
-          <button className="mstage-hotkeys-btn" onClick={() => setShowHotkeys(true)} title="Hotkeys">⌨</button>
-        )}
+        <button className="mstage-settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
       </div>
 
-      {showHotkeys && (
-        <div className="overlay" onClick={() => { setShowHotkeys(false); setListeningFor(null); }}>
+      {showSettings && (
+        <div className="overlay" onClick={() => { setShowSettings(false); setListeningFor(null); }}>
           <div className="new-sl-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-hdr">
-              <span>HOTKEYS — THIS DEVICE</span>
-              <button className="fm-close" onClick={() => { setShowHotkeys(false); setListeningFor(null); }}>✕</button>
+              <span>SETTINGS — THIS DEVICE</span>
+              <button className="fm-close" onClick={() => { setShowSettings(false); setListeningFor(null); }}>✕</button>
             </div>
             <div className="modal-body">
+              <div className="settings-section-title">SHEET MUSIC</div>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.auto} onChange={e => updateSheetPrefs({ auto: e.target.checked })} />
+                <span>Automatically show sheet music</span>
+              </label>
+              <p className="sd-hint">
+                When a song with sheet music starts playing, its chart opens by itself — on the
+                first preferred type below that the song has.
+              </p>
+              <div className="settings-subtitle">Preferred types</div>
+              <div className="settings-checks">
+                {sheetTypeOptions.map(t => (
+                  <label key={t} className="settings-check">
+                    <input type="checkbox" checked={sheetPrefs.types.includes(t)}
+                      onChange={e => updateSheetPrefs({ types: e.target.checked
+                        ? [...sheetPrefs.types, t] : sheetPrefs.types.filter(x => x !== t) })} />
+                    <span>{t}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="sd-hint">
+                Checked types are listed first on every song, in the order shown here. With none
+                checked, a song's first chart is the one shown automatically.
+              </p>
+              {canControl && (<>
+              <div className="settings-section-title">HOTKEYS</div>
               <p className="sd-hint">
                 Bindings are saved on this device only. Pick A Cover keys only fire while a
                 Pick A Cover folder is playing and waiting for a choice.
@@ -1353,9 +1475,10 @@ function MobileStageView({
                   </div>
                 ))}
               </div>
+              </>)}
             </div>
             <div className="modal-footer">
-              <button className="modal-confirm" onClick={() => { setShowHotkeys(false); setListeningFor(null); }}>DONE</button>
+              <button className="modal-confirm" onClick={() => { setShowSettings(false); setListeningFor(null); }}>DONE</button>
             </div>
           </div>
         </div>

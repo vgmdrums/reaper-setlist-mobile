@@ -45,7 +45,4 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // QR scanning for the one-time pairing flow — a thin wrapper around
-    // ZXing that handles camera permission + the scan activity for us.
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

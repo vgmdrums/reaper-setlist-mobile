@@ -7,7 +7,7 @@
 # tray app, not a windowed one), no cryptography (Tailscale/HTTPS dropped in
 # favor of plain LAN + a pairing token), no email — but it DOES need tkinter
 # (excluded there, required here for the status window) plus pystray/PIL/
-# qrcode/pywin32 for the tray icon, QR rendering, and the autostart shortcut.
+# pywin32 for the tray icon and the autostart shortcut.
 
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
@@ -80,7 +80,6 @@ hiddenimports += [
     'PIL.Image',
     'PIL.ImageDraw',
     'PIL.ImageTk',
-    'qrcode',
     'pypdfium2',
     'pypdfium2_raw',
     'win32com.client',

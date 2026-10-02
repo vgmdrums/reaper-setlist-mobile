@@ -5,10 +5,9 @@
     <string name="device_name_hint">e.g. Kyle\'s Phone, Stage Left Tablet</string>
     <string name="device_name_error">Name this device before connecting.</string>
     <string name="pairing_title">Pair with your computer</string>
-    <string name="pairing_hint">Open Genius SetList Mobile in your PC\'s system tray, choose \"Show status &amp; pairing QR\", and scan the code below.</string>
-    <string name="scan_qr">Scan QR code</string>
+    <string name="pairing_hint">Open Genius SetList Mobile in your PC\'s system tray, choose \"Show status &amp; pairing phrase\", and type the phrase below. Both devices must be on the same Wi-Fi.</string>
     <string name="pairing_usb">Connect w/ USB</string>
-    <string name="pairing_manual_hint">Or type the pairing phrase shown in the tray app (e.g. tiger-lagoon-84):</string>
+    <string name="pairing_manual_hint">Pairing phrase (e.g. tiger-lagoon-84):</string>
     <string name="pairing_connect">Connect</string>
     <string name="pairing_searching">Searching…</string>
     <string name="pairing_error_invalid">Enter the pairing phrase from the tray app.</string>

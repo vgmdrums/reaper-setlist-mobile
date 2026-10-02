@@ -1,8 +1,9 @@
 """
 Pairing: auth token persistence and local network address discovery for the
 Genius SetList Mobile companion. The phone gets {host, port, token} once,
-via a QR code shown in the tray app's status window (see tray.py) — there is
-no unauthenticated REST endpoint that hands this out.
+in answer to the pairing phrase shown in the tray app's status window (see
+tray.py) — there is no unauthenticated Wi-Fi-reachable REST endpoint that
+hands this out.
 """
 import os
 import json
@@ -93,7 +94,7 @@ def _generate_phrase() -> str:
 
 
 def get_or_create_phrase() -> str:
-    """A stable, human-typeable alternative to scanning the QR code. It is
+    """The stable, human-typeable code a phone types to pair. It is
     NOT the auth secret itself — it only lets the phone *find* this machine
     on the Wi-Fi network (see discovery server in main.py); the real
     session token still comes back in the discovery reply."""
@@ -122,7 +123,7 @@ def get_local_ip() -> dict:
     Both devices are expected on the same Wi-Fi access point, so the phone
     just needs this machine's LAN IP — no VPN/relay involved. The UDP-connect
     trick below sends no packets (UDP `connect()` only resolves a route); it's
-    the same approach the old desktop app used for its LAN QR code.
+    the same approach the old desktop app used for its LAN address.
     """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -318,10 +319,16 @@ def set_can_control_playback(device_id: str, can_control: bool):
     _update_config(mutate)
 
 
-def build_pairing_payload(port: int) -> dict:
-    """Returns {"ok": bool, "payload": {host, port, token} | None, "error": str | None}."""
-    addr = get_local_ip()
-    if not addr["ok"]:
-        return {"ok": False, "payload": None, "error": addr["error"]}
-    payload = {"host": addr["ip"], "port": port, "token": get_or_create_token()}
-    return {"ok": True, "payload": payload, "error": None}
+def get_sheet_folder() -> str:
+    """The folder the user picked in the tray to hold their sheet-music PDFs
+    ("" = none chosen; the REAPER project's own folder is still searched)."""
+    return load_config().get("sheet_music_folder", "") or ""
+
+
+def set_sheet_folder(path: str):
+    def mutate(cfg):
+        if path:
+            cfg["sheet_music_folder"] = path
+        else:
+            cfg.pop("sheet_music_folder", None)
+    _update_config(mutate)
