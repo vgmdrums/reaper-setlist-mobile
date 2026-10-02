@@ -10,9 +10,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -25,8 +28,22 @@ import org.json.JSONObject
  *     companion answers with the real host/port/token.
  *  3. Paste the raw QR JSON by hand, for when the camera can't be used.
  * The manual field accepts either a phrase or JSON and figures out which.
+ *
+ * Plugged in over USB (debugging authorized, companion running), none of that
+ * is needed: this is the launcher activity, so on every launch it checks for
+ * the cable first and goes straight to the app if it's there. If a cable
+ * shows up while this screen is open, a "Connect w/ USB" button appears.
  */
 class PairingActivity : AppCompatActivity() {
+
+    companion object {
+        /** Stay on this screen even if a USB connection is available — set on a
+         * deliberate re-pair, and when a USB connection just failed to pan out. */
+        const val EXTRA_SKIP_AUTO_USB = "skipAutoUsb"
+    }
+
+    // The companion's pairing info, while a USB tunnel to it is up (else null).
+    private var usbPairing: PairingInfo? = null
 
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let { handlePairingText(it) }
@@ -43,6 +60,11 @@ class PairingActivity : AppCompatActivity() {
         // (an upgrade from an older install may have pairing info but no
         // name yet, since that field didn't exist before).
         lifecycleScope.launch {
+            if (!intent.getBooleanExtra(EXTRA_SKIP_AUTO_USB, false) &&
+                UsbLink.fetchPairing(PairingStore.get(this@PairingActivity)?.port ?: UsbLink.DEFAULT_PORT) != null) {
+                startMain() // MainActivity fetches and saves the pairing itself
+                return@launch
+            }
             val savedLabel = PairingStore.getDeviceLabel(this@PairingActivity)
             if (!savedLabel.isNullOrBlank()) {
                 findViewById<EditText>(R.id.deviceNameInput).setText(savedLabel)
@@ -59,6 +81,23 @@ class PairingActivity : AppCompatActivity() {
             if (!lastInput.isNullOrBlank()) {
                 findViewById<EditText>(R.id.manualInput).setText(lastInput)
             }
+        }
+
+        // A cable plugged in (or pulled out) while this screen is open shows or
+        // hides the button; checking only while the screen is actually visible.
+        val usbButton = findViewById<Button>(R.id.usbButton)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    usbPairing = UsbLink.fetchPairing()
+                    usbButton.visibility = if (usbPairing != null) View.VISIBLE else View.GONE
+                    delay(2000)
+                }
+            }
+        }
+        usbButton.setOnClickListener {
+            if (requireDeviceName() == null) return@setOnClickListener
+            usbPairing?.let { savePairingAndStart(it) }
         }
 
         findViewById<Button>(R.id.scanButton).setOnClickListener {

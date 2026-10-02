@@ -1390,9 +1390,6 @@ export default function App() {
   // pushed mid-session by the tray.
   useEffect(() => { if (!isAdmin && mode === "edit") setMode("stage"); }, [isAdmin, mode]);
 
-  // REAPER opened a project that matches a saved (but not currently active) setlist
-  const [projectSwitchPrompt, setProjectSwitchPrompt] = useState(null); // {proj_name, matched_setlist_id, matched_setlist_name} | null
-
   // ── Tracks / VU meters ─────────────────────────────────────────────────────
   const [tracks,        setTracks]       = useState([]);
   const [trackPeaks,    setTrackPeaks]   = useState([]);
@@ -1556,13 +1553,6 @@ export default function App() {
       // Just (re)connected — fetch everything fresh
       if (m.type === "connection_changed" && m.reaper_connected) {
         fetchProjectsRef.current?.();
-      }
-      // REAPER opened a project that matches a saved setlist — only worth a
-      // prompt if that setlist isn't already the one we're on.
-      if (m.type === "project_switch_prompt") {
-        if (m.matched_setlist_id && m.matched_setlist_id !== activeSetlistIdRef.current) {
-          setProjectSwitchPrompt(m);
-        }
       }
       // Tray assigned/changed the admin device — takes effect immediately,
       // including for devices already mid-session (no reconnect needed).
@@ -3402,31 +3392,6 @@ export default function App() {
           reaperConnected={reaperConnected}
           onClose={() => setShowDrawer(false)}
           listRef={regionListRef} onKeyDown={handleSearchKey} />
-      )}
-
-      {/* ── Project-switch prompt (REAPER opened a project with a matching setlist) ── */}
-      {projectSwitchPrompt && (
-        <div className="overlay" onClick={() => setProjectSwitchPrompt(null)}>
-          <div className="new-sl-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-hdr">
-              <span>PROJECT CHANGED</span>
-              <button className="fm-close" onClick={() => setProjectSwitchPrompt(null)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <p className="sd-hint">
-                REAPER opened <strong>{projectSwitchPrompt.proj_name}</strong>, which is linked to the setlist{" "}
-                <strong>{projectSwitchPrompt.matched_setlist_name}</strong>.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="modal-cancel" onClick={() => setProjectSwitchPrompt(null)}>STAY HERE</button>
-              <button className="modal-confirm" onClick={() => {
-                loadSetlist(projectSwitchPrompt.matched_setlist_id);
-                setProjectSwitchPrompt(null);
-              }}>SWITCH SETLIST</button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* ── New Setlist Modal ── */}

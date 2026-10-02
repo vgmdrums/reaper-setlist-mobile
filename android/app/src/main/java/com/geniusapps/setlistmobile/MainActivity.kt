@@ -16,11 +16,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -108,46 +104,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadFromSavedPairing() {
         lifecycleScope.launch {
-            val info = PairingStore.get(this@MainActivity)
+            val saved = PairingStore.get(this@MainActivity)
+            // The companion keeps `adb reverse` alive whenever this phone is
+            // plugged in with USB debugging authorized (see main.py's
+            // usb_tether_loop), so 127.0.0.1 on THIS phone reaches the PC on
+            // the other end of the cable — and that PC will hand us its own
+            // pairing info there. So a phone on a cable needs no QR code or
+            // phrase, and one moved to a different computer simply follows
+            // the cable: the info is saved over whatever it had, keeping the
+            // PC's LAN address as the fallback for when the cable comes out.
+            // With no cable the refused connection is instant, so Wi-Fi-only
+            // launches don't feel it.
+            val usb = UsbLink.fetchPairing(saved?.port ?: UsbLink.DEFAULT_PORT)
+            val info = usb ?: saved
             if (info == null) {
-                goToPairing()
+                goToPairing(skipAutoUsb = true)
                 return@launch
             }
+            if (usb != null && usb != saved) PairingStore.save(this@MainActivity, usb)
             val label = PairingStore.getDeviceLabel(this@MainActivity) ?: ""
             val encodedLabel = URLEncoder.encode(label, "UTF-8")
-            // The companion keeps `adb reverse tcp:port tcp:port` alive
-            // automatically whenever this phone is plugged in with USB
-            // debugging authorized (see main.py's usb_tether_loop) — when
-            // that's active, 127.0.0.1 on THIS phone forwards over the
-            // cable to the companion PC. Try it first; if nothing answers
-            // there (no cable, debugging not authorized, companion not
-            // tethering), fall back to the saved Wi-Fi host exactly as
-            // before. A short timeout keeps the common Wi-Fi-only case from
-            // feeling any slower at launch.
-            val host = if (probeUsb(info.port, info.token)) "127.0.0.1" else info.host
+            // An older companion can't hand out pairing info but still
+            // tunnels, so a phone already paired to one keeps preferring the
+            // cable when it answers there.
+            val host = if (usb != null || UsbLink.reachableWith(info.port, info.token)) "127.0.0.1" else info.host
             webView.loadUrl("http://$host:${info.port}/?token=${info.token}&device_label=$encodedLabel")
-        }
-    }
-
-    private suspend fun probeUsb(port: Int, token: String): Boolean = withContext(Dispatchers.IO) {
-        var conn: HttpURLConnection? = null
-        try {
-            conn = URL("http://127.0.0.1:$port/health?token=$token").openConnection() as HttpURLConnection
-            conn.connectTimeout = 500
-            conn.readTimeout = 500
-            conn.requestMethod = "GET"
-            conn.responseCode in 200..299
-        } catch (e: Exception) {
-            false
-        } finally {
-            conn?.disconnect()
         }
     }
 
     private fun rePair() {
         lifecycleScope.launch {
             PairingStore.clear(this@MainActivity)
-            goToPairing()
+            goToPairing(skipAutoUsb = true)
         }
     }
 
@@ -176,8 +164,11 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus && fullscreenEnabled) enableFullscreen() // re-hide after a transient swipe-reveal or app resume
     }
 
-    private fun goToPairing() {
-        startActivity(Intent(this, PairingActivity::class.java))
+    /** skipAutoUsb: this is a deliberate stop at the pairing screen (an explicit
+     * re-pair, or a USB connection that didn't pan out) — don't let it
+     * auto-connect over the cable and bounce straight back out. */
+    private fun goToPairing(skipAutoUsb: Boolean) {
+        startActivity(Intent(this, PairingActivity::class.java).putExtra(PairingActivity.EXTRA_SKIP_AUTO_USB, skipAutoUsb))
         finish()
     }
 }

@@ -15,7 +15,7 @@ SETUP (one time, in REAPER):
 
 import sys, os, threading, time, json, asyncio, uvicorn, uuid, secrets, subprocess
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, APIRouter, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, APIRouter, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -27,7 +27,7 @@ import pairing
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.12"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -554,27 +554,6 @@ async def clients():
     return manager.list_clients()
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
-def _find_matching_setlist(proj_path: str) -> Optional[dict]:
-    """Find a saved setlist whose linked rppPath matches the given project path
-    (case-insensitive; REAPER paths on Windows aren't case-sensitive)."""
-    if not proj_path:
-        return None
-    path = get_setlists_path()
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-    if not isinstance(data, list):
-        return None
-    target = proj_path.strip().lower()
-    for sl in data:
-        if isinstance(sl, dict) and (sl.get("rppPath") or "").strip().lower() == target:
-            return sl
-    return None
-
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device: Optional[str] = "phone",
                        device_id: Optional[str] = None):
@@ -594,7 +573,6 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device:
     last_connected = None
     last_region_sig = None
     last_proj_sig = None
-    last_switch_prompt_path = None
     slow_tick = 0
 
     try:
@@ -654,22 +632,6 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device:
                     last_proj_sig = proj_sig
                     await websocket.send_json({"type": "projects_changed"})
 
-                    # Project-switch prompt: only when the new project matches a
-                    # saved setlist. Whether that setlist is already the one the
-                    # phone has active is a client-side decision (the server has
-                    # no concept of "active setlist" — that lives in the app UI).
-                    if proj_sig and proj_sig != last_switch_prompt_path:
-                        matched = await loop.run_in_executor(None, _find_matching_setlist, proj_sig)
-                        if matched:
-                            last_switch_prompt_path = proj_sig
-                            await websocket.send_json({
-                                "type": "project_switch_prompt",
-                                "proj_name": state.get("proj_name", ""),
-                                "proj_path": proj_sig,
-                                "matched_setlist_id": matched.get("id"),
-                                "matched_setlist_name": matched.get("name"),
-                            })
-
                 midi_devices = [d for d in state.get("midi_devices", [])
                                 if d.get("name", "").lower() not in MIDI_BLOCKLIST]
                 await websocket.send_json({"type": "midi_devices", "devices": midi_devices})
@@ -684,6 +646,35 @@ def _bundled(filename):
     if getattr(sys, "frozen", False):
         return os.path.join(sys._MEIPASS, filename)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+
+# ── USB pairing (no QR, no phrase) ────────────────────────────────────────────
+# A phone plugged in with USB debugging already has a tunnel to this PC (see
+# usb_tether_loop), so it can ask for its pairing info directly instead of
+# scanning a code. This hands out the token, so it's deliberately narrow:
+#  * only loopback callers — the tunnel reaches us as 127.0.0.1, a phone on the
+#    Wi-Fi arrives from its own address and is refused (it still pairs by QR/phrase);
+#  * never anything carrying a browser's Origin / Sec-Fetch-* headers — a web
+#    page open on this PC can reach 127.0.0.1 too, and CORS here is wide open,
+#    so refusing browser-originated requests is what keeps it from reading this;
+#  * only a 127.0.0.1/localhost Host header, against DNS-rebinding;
+#  * only while a USB tether is actually up.
+# Tradeoff worth knowing: any app on a phone that's plugged in this way can make
+# the same request, so USB pairing trusts the phone's own apps for as long as the
+# cable and the tunnel are there.
+@app.get("/usb-pair")
+async def usb_pair(request: Request):
+    caller = request.client.host if request.client else ""
+    hostname = request.headers.get("host", "").rsplit(":", 1)[0].strip("[]").lower()
+    if (caller not in ("127.0.0.1", "::1")
+            or "origin" in request.headers or "sec-fetch-site" in request.headers
+            or hostname not in ("127.0.0.1", "localhost")
+            or _usb_status.get("state") != "active"):
+        raise HTTPException(403, "USB pairing is only available over the USB cable")
+    # The LAN address is what the phone keeps as its fallback for when the
+    # cable comes out; with no network at all, loopback is all there is.
+    addr = pairing.get_local_ip()
+    return {"host": addr["ip"] if addr["ok"] else "127.0.0.1", "port": PORT,
+            "token": pairing.get_or_create_token()}
 
 @app.get("/sw.js")
 async def service_worker():

@@ -7,6 +7,7 @@
     <string name="pairing_title">Pair with your computer</string>
     <string name="pairing_hint">Open Genius SetList Mobile in your PC\'s system tray, choose \"Show status &amp; pairing QR\", and scan the code below.</string>
     <string name="scan_qr">Scan QR code</string>
+    <string name="pairing_usb">Connect w/ USB</string>
     <string name="pairing_manual_hint">Or type the pairing phrase shown in the tray app (e.g. tiger-lagoon-84):</string>
     <string name="pairing_connect">Connect</string>
     <string name="pairing_searching">Searching…</string>

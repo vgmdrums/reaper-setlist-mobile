@@ -48,6 +48,17 @@
         android:gravity="center"
         android:layout_marginBottom="24dp" />
 
+    <!-- Only shown while a USB connection to the companion is available. -->
+    <Button
+        android:id="@+id/usbButton"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="@string/pairing_usb"
+        android:backgroundTint="#3ecf6e"
+        android:textColor="#0e0e10"
+        android:visibility="gone"
+        android:layout_marginBottom="16dp" />
+
     <Button
         android:id="@+id/scanButton"
         android:layout_width="match_parent"
