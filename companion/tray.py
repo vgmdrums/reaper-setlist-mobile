@@ -115,6 +115,16 @@ class TrayApp:
             ),
         )
 
+    def notify(self, title, message):
+        """A toast from the tray icon. Callable from any thread; a failure
+        (icon not up yet, notifications unavailable) is never worth crashing
+        the caller over. Windows caps these at 63 / 255 characters and errors
+        on longer text, hence the truncation."""
+        try:
+            self.icon.notify(message[:255], title[:63])
+        except Exception:
+            pass
+
     def _show_status(self, icon=None, item=None):
         self.root.after(0, self._build_status_window)
 
@@ -152,7 +162,7 @@ class TrayApp:
         pairing = self.get_pairing()
         update = self.get_update()
         usb = self.get_usb()
-        self._last_refresh_key = (self._clients_key(clients), usb.get("message"))
+        self._last_refresh_key = self._screen_key(clients, usb, status)
 
         # REAPER connection is the single most important thing in this
         # window — nothing else here works without it — so it gets its own
@@ -172,6 +182,19 @@ class TrayApp:
                      bg=reaper_bg, fg=FG_DIM).pack(pady=(0, 10))
         else:
             tk.Frame(reaper_row, bg=reaper_bg, height=6).pack()
+
+        # The toast from notify() can be missed or suppressed (Focus Assist,
+        # notifications off), so the same message stays here until the right
+        # project is open.
+        mismatch = status.get("project_mismatch")
+        if mismatch:
+            warn_bg = "#2a2410"
+            warn = tk.Frame(win, bg=warn_bg)
+            warn.pack(fill="x")
+            tk.Label(warn, text="Setlist not open in REAPER", bg=warn_bg, fg=ACCENT,
+                     font=("Segoe UI", 10, "bold")).pack(pady=(8, 0))
+            tk.Label(warn, text=f"Please open: {mismatch['setlist_name']} ({mismatch['wanted_name']})",
+                     bg=warn_bg, fg=FG, font=("Segoe UI", 9), wraplength=380, justify="center").pack(pady=(0, 8), padx=10)
 
         # Always says what USB is doing — and why not, when it isn't working.
         # A wired phone that silently does nothing looks identical whether
@@ -316,6 +339,14 @@ class TrayApp:
             for c in clients
         ))
 
+    def _screen_key(self, clients, usb, status):
+        """Everything in the window that changes on its own — device list, USB
+        state, REAPER connection/project, and the wrong-project warning — so
+        the auto-refresh redraws only when something actually moved."""
+        mismatch = status.get("project_mismatch") or {}
+        return (self._clients_key(clients), usb.get("message"), status.get("reaper_connected"),
+                status.get("current_project"), mismatch.get("wanted_path"))
+
     def _start_auto_refresh(self):
         if self._auto_refresh_running:
             return
@@ -325,7 +356,7 @@ class TrayApp:
     def _auto_refresh_tick(self):
         win = self._status_win
         if win is not None and win.winfo_exists() and win.state() != "withdrawn":
-            if (self._clients_key(self.get_clients()), self.get_usb().get("message")) != self._last_refresh_key:
+            if self._screen_key(self.get_clients(), self.get_usb(), self.get_status()) != self._last_refresh_key:
                 self._refresh_status_window()
             self.root.after(2000, self._auto_refresh_tick)
         else:

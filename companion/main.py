@@ -27,7 +27,7 @@ import pairing
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.10"
+APP_VERSION = "1.0.11"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -1011,10 +1011,91 @@ def usb_tether_loop():
 def get_usb_status_for_tray() -> dict:
     return dict(_usb_status)
 
+# ── "Is the setlist's project actually open in REAPER?" ───────────────────────
+# The app used to open the setlist's project in REAPER by itself (on load, on
+# connect, on switching setlists). Now it only TELLS the person at the PC: a
+# tray notification naming what to open, plus a standing line in the tray
+# window in case the toast is missed or suppressed (Focus Assist, etc.).
+PROJECT_WATCH_INTERVAL = 2      # seconds between checks
+PROJECT_MISMATCH_GRACE = 6      # must stay wrong this long before notifying —
+                                # REAPER's bridge comes up before its project
+                                # finishes loading, and switching projects
+                                # passes through briefly-wrong states
+
+def _norm_path(p: str) -> str:
+    """Comparable form of a Windows path: slashes, case and '..' normalized —
+    the setlist's stored path and REAPER's reported one needn't match
+    character for character to be the same file."""
+    return os.path.normcase(os.path.normpath(p.strip())) if p and p.strip() else ""
+
+def _active_setlist() -> Optional[dict]:
+    """The setlist the show is using, as best the server can tell. It has no
+    UI state of its own (what's open lives in each device's app), so this is
+    the one most recently created or loaded: loading stamps lastUsed, a new
+    one has createdAt — the same recency the app itself opens on at startup."""
+    try:
+        with open(get_setlists_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    lists = [s for s in data if isinstance(s, dict)] if isinstance(data, list) else []
+    return max(lists, key=lambda s: max(s.get("lastUsed") or 0, s.get("createdAt") or 0), default=None)
+
+def get_project_mismatch() -> Optional[dict]:
+    """None when the right project is open — or when there's nothing to
+    compare: REAPER isn't connected (then there's no 'current project' to
+    check; the tray already says so), or the setlist isn't linked to a
+    project. Otherwise what's wanted vs. what's open."""
+    if not bridge_connected():
+        return None
+    setlist = _active_setlist()
+    wanted = ((setlist or {}).get("rppPath") or "").strip()
+    if not wanted:
+        return None
+    current = (read_bridge_state().get("proj_path") or "").strip()
+    if _norm_path(current) == _norm_path(wanted):
+        return None
+    return {
+        "setlist_id": setlist.get("id"),
+        "setlist_name": setlist.get("name") or "Untitled setlist",
+        "wanted_path": wanted,
+        "wanted_name": os.path.basename(wanted),
+        "current_path": current,
+        "current_name": os.path.basename(current) if current else "",
+    }
+
+def project_mismatch_message(m: dict) -> str:
+    return (f'The current setlist is not open in REAPER. Please open: '
+            f'{m["setlist_name"]} ({m["wanted_name"]})')
+
+def project_watch_loop(notify):
+    """Runs for the life of the app; notify(title, message) shows the tray
+    toast. Notifies once per distinct wrong-project situation (a different
+    setlist, or a different project open, counts as new) and again if it
+    gets fixed and then goes wrong later — not every few seconds."""
+    notified_key = pending_key = None
+    pending_since = 0.0
+    while True:
+        try:
+            m = get_project_mismatch()
+            if m is None:
+                notified_key = pending_key = None
+            else:
+                key = (m["setlist_id"], _norm_path(m["wanted_path"]), _norm_path(m["current_path"]))
+                if key != pending_key:
+                    pending_key, pending_since = key, time.time()
+                elif key != notified_key and time.time() - pending_since >= PROJECT_MISMATCH_GRACE:
+                    notify("Setlist not open in REAPER", project_mismatch_message(m))
+                    notified_key = key
+        except Exception:
+            pass  # a bad read this round just means checking again next round
+        time.sleep(PROJECT_WATCH_INTERVAL)
+
 def get_status_for_tray() -> dict:
     connected = bridge_connected()
     state = read_bridge_state() if connected else {}
-    return {"reaper_connected": connected, "current_project": state.get("proj_name") or state.get("proj_path")}
+    return {"reaper_connected": connected, "current_project": state.get("proj_name") or state.get("proj_path"),
+            "project_mismatch": get_project_mismatch() if connected else None}
 
 def get_pairing_for_tray() -> dict:
     return pairing.build_pairing_payload(PORT)
@@ -1230,4 +1311,5 @@ if __name__ == "__main__":
         remove_device_fn=remove_device_for_tray,
         on_quit=_on_quit,
     )
+    threading.Thread(target=project_watch_loop, args=(tray_app.notify,), daemon=True).start()
     tray_app.run()

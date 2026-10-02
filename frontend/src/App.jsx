@@ -1484,21 +1484,9 @@ export default function App() {
     openReaper(setlist.rppPath);
   }, [reaperConnected, activeSetlistId, allSetlists]);
 
-  // Once Reaper IS connected, switch to the correct project if it doesn't already match
-  const didAutoOpenRef = useRef(false);
-  useEffect(() => {
-    if (!reaperConnected || !activeSetlistId || didAutoOpenRef.current) return;
-    didAutoOpenRef.current = true;
-    const setlist = allSetlists.find(s => s.id === activeSetlistId);
-    if (!setlist?.rppPath) return;
-    fetch(`${API}/current-project-path`).then(r => r.json()).then(cur => {
-      if (cur.path && cur.path.toLowerCase() === setlist.rppPath.toLowerCase()) return;
-      fetch(`${API}/open-project`, {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ rpp_path: setlist.rppPath }),
-      }).catch(() => {});
-    }).catch(() => {});
-  }, [reaperConnected, activeSetlistId]);
+  // The setlist's project is no longer opened in Reaper automatically — the
+  // companion's tray shows a notification naming the project to open when the
+  // wrong one is up (see project_watch_loop in companion/main.py).
 
 
   // Use a ref for fetchProjects/fetchRegions so the WS closure always sees current version
@@ -2640,20 +2628,6 @@ export default function App() {
   async function loadSetlist(id) {
     const target = allSetlists.find(s => s.id === id);
     if (!target) return;
-    // If different rpp, open it in Reaper
-    if (target.rppPath && reaperConnected) {
-      try {
-        const cur = await fetch(`${API}/current-project-path`).then(r => r.json());
-        if (cur.path && cur.path.toLowerCase() !== target.rppPath.toLowerCase()) {
-          await fetch(`${API}/open-project`, {
-            method:"POST", headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({ rpp_path: target.rppPath }),
-          });
-          await new Promise(r => setTimeout(r, 800));
-          fetchProjects();
-        }
-      } catch(e){ console.error(e); }
-    }
     setActiveId(id);
     setCurrentIndex(-1);
     setFocusedIndex(-1);
