@@ -27,7 +27,7 @@ import pairing
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.10"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -1028,18 +1028,21 @@ def get_local_url_for_tray() -> str:
 def get_clients_for_tray() -> list:
     """Every device that's ever connected (named, persistent history), not
     just who's online right now — so the tray can assign admin to a device
-    that happens to be offline at the moment. Any number can be admin."""
-    known = pairing.get_known_devices()
+    that happens to be offline at the moment. Any number can be admin.
+
+    One row per real device: ids that share a name (the same phone over Wi-Fi
+    and over USB, say) are listed once, online if ANY of them is connected —
+    see pairing.get_device_groups()."""
     admin_ids = pairing.get_admin_device_ids()
     online_ids = {c["device_id"] for c in manager.connections if c["device_id"]}
     result = [{
-        "device_id": device_id,
-        "label": info.get("label") or "Unnamed device",
-        "is_admin": device_id in admin_ids,
-        "can_control": device_id in admin_ids or pairing.can_control_playback(device_id),
-        "online": device_id in online_ids,
-        "last_seen": info.get("last_seen", 0),
-    } for device_id, info in known.items()]
+        "device_id": group["device_id"],
+        "label": group["label"],
+        "is_admin": any(i in admin_ids for i in group["ids"]),
+        "can_control": any(i in admin_ids or pairing.can_control_playback(i) for i in group["ids"]),
+        "online": any(i in online_ids for i in group["ids"]),
+        "last_seen": group["last_seen"],
+    } for group in pairing.get_device_groups()]
     result.sort(key=lambda d: (not d["online"], -d["last_seen"]))
     return result
 

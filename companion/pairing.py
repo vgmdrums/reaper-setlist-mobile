@@ -143,6 +143,77 @@ def get_local_ip() -> dict:
     return {"ok": False, "error": "Could not determine this machine's Wi-Fi/LAN IP address."}
 
 
+# ── Same name = same device ───────────────────────────────────────────────────
+# A device's id is generated per browser origin, so one physical phone shows up
+# as several ids — e.g. over Wi-Fi (http://192.168.x.x) and over USB
+# (http://127.0.0.1) are different origins with different localStorage. The
+# name the user gave it is the one thing they share, so devices with the same
+# name are treated as one: a newly-connecting device inherits what the existing
+# one was allowed to do, the permissions are combined, and the tray manages
+# them together.
+
+def _label_key(label) -> str:
+    """Normalized name used to decide two devices are the same one. Blank and
+    the "Unnamed device" placeholder return '' — those must never group, or
+    every nameless device would silently share one set of permissions."""
+    key = " ".join((label or "").split()).casefold()
+    return "" if key in ("", "unnamed device") else key
+
+
+def _group_ids(cfg: dict, device_id: str) -> list:
+    """device_id plus every other known device with the same name."""
+    devices = cfg.get("devices", {})
+    key = _label_key(devices.get(device_id, {}).get("label"))
+    if not key:
+        return [device_id]
+    return [i for i, e in devices.items() if _label_key(e.get("label")) == key] or [device_id]
+
+
+def _admin_set(cfg: dict) -> set:
+    return set(cfg.get("admin_device_ids") or ([cfg["admin_device_id"]] if cfg.get("admin_device_id") else []))
+
+
+def _merge_group_permissions(cfg: dict, ids: list):
+    """Give every id in the group the combined permissions of the group:
+    admin if any member is, and playback control if any member was EXPLICITLY
+    set to allow it. Only explicit entries count — a member with no entry has
+    the implicit default (allowed), and letting that default count would
+    quietly upgrade a view-only device the moment a fresh id joined its name."""
+    admins = _admin_set(cfg)
+    perms = cfg.setdefault("device_permissions", {})
+    any_admin = any(i in admins for i in ids)
+    explicit = [perms[i]["can_control"] for i in ids if "can_control" in perms.get(i, {})]
+    for i in ids:
+        if any_admin:
+            admins.add(i)
+        if explicit:
+            entry = perms.get(i, {})
+            entry["can_control"] = any(explicit)
+            perms[i] = entry
+    cfg["admin_device_ids"] = sorted(admins)
+    cfg.pop("admin_device_id", None)
+
+
+def get_device_groups() -> list:
+    """One entry per real device, for the tray: [{"device_id": representative
+    (the oldest), "ids": [every id sharing the name], "label", "last_seen"}]."""
+    devices = load_config().get("devices", {})
+    groups = {}
+    for device_id, entry in devices.items():
+        groups.setdefault(_label_key(entry.get("label")) or "id:" + device_id, []).append(device_id)
+    result = []
+    for ids in groups.values():
+        ids.sort(key=lambda i: devices[i].get("first_seen", 0))
+        latest = max(ids, key=lambda i: devices[i].get("last_seen", 0))
+        result.append({
+            "device_id": ids[0],
+            "ids": ids,
+            "label": " ".join((devices[latest].get("label") or "").split()) or "Unnamed device",
+            "last_seen": devices[latest].get("last_seen", 0),
+        })
+    return result
+
+
 def get_admin_device_ids() -> set:
     """The devices (by their self-generated device_id) allowed into Edit
     mode — every other connected device is locked to Stage view. Empty set
@@ -164,8 +235,9 @@ def set_device_admin(device_id: str, is_admin: bool):
     if not device_id:
         return
     def mutate(cfg):
-        ids = set(cfg.get("admin_device_ids") or ([cfg["admin_device_id"]] if cfg.get("admin_device_id") else []))
-        ids.add(device_id) if is_admin else ids.discard(device_id)
+        ids = _admin_set(cfg)
+        for member in _group_ids(cfg, device_id):
+            ids.add(member) if is_admin else ids.discard(member)
         cfg["admin_device_ids"] = sorted(ids)
         cfg.pop("admin_device_id", None)
     _update_config(mutate)
@@ -188,6 +260,12 @@ def record_device(device_id: str, label: str):
         entry.setdefault("first_seen", now)
         entry["last_seen"] = now
         devices[device_id] = entry
+        # Same name as a device we already know -> inherit and combine (see
+        # the "Same name = same device" note above). Runs on every connect;
+        # re-merging an already-consistent group changes nothing.
+        members = _group_ids(cfg, device_id)
+        if len(members) > 1:
+            _merge_group_permissions(cfg, members)
     _update_config(mutate)
 
 
@@ -205,11 +283,13 @@ def remove_device(device_id: str):
     if not device_id:
         return
     def mutate(cfg):
-        cfg.get("devices", {}).pop(device_id, None)
+        members = _group_ids(cfg, device_id)  # before popping — grouping reads the labels
         ids = set(cfg.get("admin_device_ids") or [])
-        ids.discard(device_id)
+        for member in members:
+            cfg.get("devices", {}).pop(member, None)
+            ids.discard(member)
+            cfg.get("device_permissions", {}).pop(member, None)
         cfg["admin_device_ids"] = sorted(ids)
-        cfg.get("device_permissions", {}).pop(device_id, None)
     _update_config(mutate)
 
 
@@ -231,9 +311,10 @@ def set_can_control_playback(device_id: str, can_control: bool):
         return
     def mutate(cfg):
         all_perms = cfg.setdefault("device_permissions", {})
-        entry = all_perms.get(device_id, {})
-        entry["can_control"] = can_control
-        all_perms[device_id] = entry
+        for member in _group_ids(cfg, device_id):
+            entry = all_perms.get(member, {})
+            entry["can_control"] = can_control
+            all_perms[member] = entry
     _update_config(mutate)
 
 
