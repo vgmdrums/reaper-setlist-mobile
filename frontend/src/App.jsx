@@ -956,6 +956,46 @@ function VUMeter({ label, level: externalLevel }) {
 // items, focus tracking, PAC/soundcheck containers) is identical to the
 // desktop view — this only changes what gets rendered and how it's tapped.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SheetViewer — a PDF chart named after a region, shown full-screen. The
+// companion renders each page to a PNG (Android's WebView has no PDF viewer),
+// so this is just images; the +/- buttons widen them past the screen and the
+// body scrolls sideways, which works the same on any device (pinch-zoom isn't
+// dependable inside a WebView).
+// ─────────────────────────────────────────────────────────────────────────────
+const SHEET_ZOOMS = [1, 1.5, 2, 3];
+
+function SheetViewer({ sheet, title, onClose }) {
+  const [zoomIdx, setZoomIdx] = useState(0);
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  // An <img> can't send the Authorization header the rest of the app uses, so
+  // the token rides in the query string (the companion accepts either).
+  const pageSrc = n => `${API}/sheet-music/page?file=${encodeURIComponent(sheet.file)}&n=${n}`
+    + (PAIR_TOKEN ? `&token=${encodeURIComponent(PAIR_TOKEN)}` : "");
+  return (
+    <div className="sheet-viewer">
+      <div className="sheet-viewer-hdr">
+        <span className="sheet-viewer-title">{title}</span>
+        <button className="sheet-viewer-btn" disabled={zoomIdx === 0}
+          onClick={() => setZoomIdx(i => i - 1)} aria-label="Zoom out">−</button>
+        <button className="sheet-viewer-btn" disabled={zoomIdx === SHEET_ZOOMS.length - 1}
+          onClick={() => setZoomIdx(i => i + 1)} aria-label="Zoom in">+</button>
+        <button className="sheet-viewer-btn" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      <div className="sheet-viewer-body">
+        {Array.from({ length: sheet.pages }, (_, n) => (
+          <img key={n} className="sheet-viewer-page" src={pageSrc(n)} alt={`${title}, page ${n + 1}`}
+            style={{ width: `${SHEET_ZOOMS[zoomIdx] * 100}%` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Hotkeys are per-device (stored in this browser's localStorage, so each
 // phone/laptop keeps its own bindings) and only meaningful on a device that
 // actually has a keyboard attached — a Bluetooth remote/pedal sends the same
@@ -992,8 +1032,11 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets,
 }) {
+  const [viewingSheet, setViewingSheet] = useState(null);
+  // A chart belongs to whichever song carries the region name it matched.
+  const sheetFor = name => (name ? sheets.find(s => s.region_names.includes(name)) : null);
   const [showHotkeys, setShowHotkeys] = useState(false);
   const [hotkeys, setHotkeys] = useState(loadHotkeys);
   const [listeningFor, setListeningFor] = useState(null);
@@ -1138,6 +1181,7 @@ function MobileStageView({
         <span className="mstage-dot" style={{ background: live.color }} />
         <span className="mstage-name">{live.name}</span>
         {item.infiniteLoop && <span className="mstage-flag loop">∞</span>}
+        {sheetFor(live.name) && <span className="mstage-flag sheet">SHEET</span>}
         <span className="mstage-dur">{item.infiniteLoop ? "∞" : dur ? fmt(dur) : ""}</span>
         {progress > 0 && <div className="mstage-prog" style={{ width: `${progress * 100}%` }} />}
       </div>
@@ -1241,9 +1285,20 @@ function MobileStageView({
 
       {selName && (
         <div className="mstage-sel">
-          <div className="mstage-sel-lbl">SELECTED{selContainer ? ` · ${selContainer}` : ""}</div>
+          <div className="mstage-sel-top">
+            <div className="mstage-sel-lbl">SELECTED{selContainer ? ` · ${selContainer}` : ""}</div>
+            {sheetFor(selName) && (
+              <button className="mstage-sheet-btn" onClick={() => setViewingSheet({ sheet: sheetFor(selName), title: selName })}>
+                SHEET
+              </button>
+            )}
+          </div>
           <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
         </div>
+      )}
+
+      {viewingSheet && (
+        <SheetViewer sheet={viewingSheet.sheet} title={viewingSheet.title} onClose={() => setViewingSheet(null)} />
       )}
 
       {/* So whoever's running the show can glance at a phone and know which
@@ -1489,13 +1544,24 @@ export default function App() {
   // Use a ref for fetchProjects/fetchRegions so the WS closure always sees current version
   const fetchProjectsRef = useRef(null);
   const fetchRegionsRef  = useRef(null);
+  // PDF charts named after a region (companion/sheets.py). Re-fetched whenever
+  // the regions or project change, since that's what decides what matches.
+  const [sheets, setSheets] = useState([]);
+  const fetchSheetsRef = useRef(null);
+  async function fetchSheets() {
+    try {
+      const data = await fetch(`${API}/sheet-music`).then(r => r.json());
+      setSheets(Array.isArray(data.sheets) ? data.sheets : []);
+    } catch (e) { /* offline — keep whatever we had */ }
+  }
+  useEffect(() => { fetchSheetsRef.current = fetchSheets; });
   const activeProjIdxRef = useRef(0);
   const refreshSetlistsRef = useRef(null);
 
   function connectWS() {
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
-    ws.onopen  = () => { setWsConnected(true); fetchProjectsRef.current?.(); };
+    ws.onopen  = () => { setWsConnected(true); fetchProjectsRef.current?.(); fetchSheetsRef.current?.(); };
     ws.onclose = () => {
       setWsConnected(false);
       setReaperConnected(false);
@@ -1546,13 +1612,16 @@ export default function App() {
       // Server detected a change — auto-refresh
       if (m.type === "regions_changed") {
         fetchRegionsRef.current?.(activeProjIdxRef.current);
+        fetchSheetsRef.current?.();
       }
       if (m.type === "projects_changed") {
         fetchProjectsRef.current?.();
+        fetchSheetsRef.current?.();
       }
       // Just (re)connected — fetch everything fresh
       if (m.type === "connection_changed" && m.reaper_connected) {
         fetchProjectsRef.current?.();
+        fetchSheetsRef.current?.();
       }
       // Tray assigned/changed the admin device — takes effect immediately,
       // including for devices already mid-session (no reconnect needed).
@@ -3279,7 +3348,7 @@ export default function App() {
           playItem={playItem} clickTrackIdx={clickTrackIdx} mainTrackIdx={mainTrackIdx} trackPeaks={trackPeaks}
           canControl={canControl}
           onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={playNext} onPrev={playPrev}
-          reaperConnected={reaperConnected} wsConnected={wsConnected}
+          reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
         />
       )}
 

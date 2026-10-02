@@ -10,7 +10,7 @@
 # qrcode/pywin32 for the tray icon, QR rendering, and the autostart shortcut.
 
 import os
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 datas = []
 binaries = []
@@ -18,6 +18,12 @@ hiddenimports = []
 
 datas += collect_data_files('uvicorn')
 datas += collect_data_files('fastapi')
+
+# PDF -> PNG for the sheet-music viewer (sheets.py). pypdfium2 is a thin wrapper
+# over pdfium.dll (in pypdfium2_raw) and reads a version.json from each of its
+# two packages at import, so all three have to ship or the import fails.
+binaries += collect_dynamic_libs('pypdfium2_raw')
+datas += collect_data_files('pypdfium2_raw') + collect_data_files('pypdfium2')
 
 # Built React frontend (run `npm run build` in ../frontend first, then copy
 # frontend/build here as static/ — see the project's build-order notes).
@@ -75,6 +81,8 @@ hiddenimports += [
     'PIL.ImageDraw',
     'PIL.ImageTk',
     'qrcode',
+    'pypdfium2',
+    'pypdfium2_raw',
     'win32com.client',
 ]
 

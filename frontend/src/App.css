@@ -1680,6 +1680,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .mstage-row.playing   .mstage-name { color: var(--accent); }
 .mstage-row.sel-play  .mstage-name { color: var(--purple); }
 .mstage-flag.loop { color: var(--blue); font-family: var(--mono); font-size: 15px; }
+.mstage-flag.sheet {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .1em; font-weight: 700;
+  color: var(--green); border: 1px solid var(--green); border-radius: 3px; padding: 1px 5px;
+}
 .mstage-dur { font-family: var(--mono); font-size: 13px; color: var(--text2); flex-shrink: 0; }
 .mstage-prog { position: absolute; bottom: 0; left: 0; height: 2px; background: var(--accent); transition: width .1s linear; }
 
@@ -1704,6 +1708,29 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
   padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 2px;
   min-height: 84px; justify-content: center;
 }
+.mstage-sel-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mstage-sheet-btn {
+  padding: 7px 16px; border-radius: 4px; cursor: pointer; flex-shrink: 0;
+  border: 1px solid var(--green); background: rgba(46,204,113,.12); color: var(--green);
+  font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .12em;
+}
+.mstage-sheet-btn:active { background: var(--green); color: #fff; }
+
+/* ── Sheet music viewer (full-screen PDF chart, rendered to PNG by the companion) ── */
+.sheet-viewer { position: fixed; inset: 0; z-index: 200; background: #0a0a0c; display: flex; flex-direction: column; }
+.sheet-viewer-hdr {
+  flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+}
+.sheet-viewer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 700; }
+.sheet-viewer-btn {
+  width: 44px; height: 44px; flex-shrink: 0; font-size: 22px; line-height: 1; cursor: pointer;
+  border: 1px solid var(--border2); border-radius: 4px; background: var(--bg3); color: var(--text);
+}
+.sheet-viewer-btn:disabled { opacity: .35; cursor: default; }
+.sheet-viewer-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 8px 0; }
+.sheet-viewer-page { display: block; max-width: none; margin: 0 auto 12px; background: #fff; }
+
 .mstage-sel-lbl { font-size: 11px; letter-spacing: 2.5px; color: var(--text2); text-transform: uppercase; font-weight: 700; }
 .mstage-sel-name {
   font-family: var(--ui); font-size: 44px; font-weight: 900; line-height: 1.05; color: var(--blue);

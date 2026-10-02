@@ -23,16 +23,22 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 import pairing
+import sheets
 
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.12"
+APP_VERSION = "1.0.13"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
     """Find Reaper's resource path (where reaper.ini lives)."""
+    # Lets a test copy (or a second REAPER install) use its own folder instead
+    # of whatever the registry says — nothing it does can then reach the real one.
+    override = os.environ.get("GENIUS_REAPER_RESOURCE")
+    if override:
+        return override
     import winreg
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\REAPER")
@@ -504,6 +510,34 @@ async def open_reaper_app():
             except OSError as e:
                 raise HTTPException(500, str(e))
     raise HTTPException(404, "Reaper not found. Please launch it manually.")
+
+# ── Sheet music (PDF charts named after a region) ─────────────────────────────
+@api.get("/sheet-music")
+def sheet_music_list():
+    """The PDFs next to the open REAPER project that are named after one of its
+    regions (see sheets.py), plus the ones that matched nothing. A plain `def`:
+    listing a Drive folder and opening PDFs is blocking work."""
+    if not bridge_connected():
+        return {"folder": "", "sheets": [], "unmatched": [], "reason": "REAPER isn't connected"}
+    state = read_bridge_state()
+    return sheets.list_sheets(state.get("proj_path") or "", state.get("regions") or [])
+
+@api.get("/sheet-music/page")
+def sheet_music_page(file: str, n: int = 0, scale: float = 2.0):
+    """One page of a chart as a PNG. Reachable with ?token= as well as the
+    Authorization header, since an <img> tag can't send headers."""
+    if not bridge_connected():
+        raise HTTPException(409, "REAPER isn't connected")
+    path = sheets.resolve(read_bridge_state().get("proj_path") or "", file)
+    if path is None:
+        raise HTTPException(404, "No such chart")
+    try:
+        png = sheets.render_page(path, n, min(max(scale, 0.5), 4.0))
+    except IndexError:
+        raise HTTPException(404, "No such page")
+    except Exception as e:
+        raise HTTPException(422, f"Couldn't read that PDF ({e})")
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
 
 @api.post("/install-bridge")
 async def install_bridge_endpoint():
