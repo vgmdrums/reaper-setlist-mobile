@@ -4,9 +4,15 @@ project, ties each one to the REAPER region it's named after, and renders its
 pages to PNG so the phone app can just show images — Android's WebView has no
 built-in PDF viewer, and a PNG also zooms and scrolls like any other picture.
 
-A chart belongs to a region when the file's name (minus ".pdf", however many
-times it's stacked — "Song.PDF.pdf" happens) matches the region's name,
-ignoring case, spacing and punctuation.
+A song can have several charts, named "{region name} - {sheet type}.pdf" —
+"Bowling For Soup - 1985 - Drums.pdf", "... - Bass.pdf" — and each sheet type
+becomes its own option under that song. A file named exactly like the region,
+with no type, is also accepted (it's just shown as a plain "Sheet").
+
+The file name is split by matching region names against its START, not by
+looking for the last dash, because region names are free to contain " - "
+themselves ("Sugar We're Going Down - Fall Out Boy"). When more than one region
+could claim a file, the longest region name wins.
 """
 import io
 import os
@@ -28,15 +34,56 @@ _scan_cache = {}    # folder -> (scanned_at, [pdf paths])
 _pages_cache = {}   # (path, mtime) -> page count
 _png_cache = {}     # (path, mtime, page, scale) -> bytes, oldest first
 
+# Hyphen-minus plus the look-alike dashes that get pasted into file names.
+_DASHES = "-‐‑‒–—"
+_TYPE_SEP = re.compile(rf"\s*[{_DASHES}]\s*(\S.*?)\s*")
 
-def name_key(name: str) -> str:
-    """Comparable form of a region name or PDF file name: '.pdf' stripped
-    (repeatedly), then only letters/digits kept, case-folded — so
-    "Bowling For Soup - 1985.PDF.pdf" and "bowling for soup – 1985" agree."""
-    stem = name or ""
+
+def _stem(file_name: str) -> str:
+    """File name without '.pdf' (however many times it's stacked — "Song.PDF.pdf"
+    happens), width/ligature-normalized."""
+    stem = unicodedata.normalize("NFKC", file_name or "")
     while stem.lower().endswith(".pdf"):
         stem = stem[:-4]
-    return re.sub(r"[\W_]+", "", unicodedata.normalize("NFKC", stem).casefold())
+    return stem.strip()
+
+
+def _region_pattern(region_name: str):
+    """Matches the START of a file name spelling this region's name — case,
+    spacing and punctuation between the words don't have to agree ("Sugar,
+    We're Going Down" finds "sugar were going down")."""
+    words = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", region_name or ""))
+    if not words:
+        return None
+    return re.compile(r"[\W_]*" + r"[\W_]*".join(re.escape(w) for w in words), re.IGNORECASE)
+
+
+def match_file(file_name: str, regions: list):
+    """(region_names, sheet_type) for the region this PDF belongs to, else None.
+    sheet_type is "" when the file is named exactly like the region."""
+    stem = _stem(file_name)
+    best_end, best = -1, None
+    for region in regions:
+        name = region.get("name", "")
+        pattern = _region_pattern(name)
+        found = pattern.match(stem) if pattern else None
+        if not found:
+            continue
+        rest = stem[found.end():]
+        if not re.search(r"[^\W_]", rest):        # nothing left but spaces/punctuation
+            if re.search(rf"[{_DASHES}]", rest):
+                continue          # "Song -.pdf": a dash promising a type that never came
+            sheet_type = ""
+        else:
+            typed = _TYPE_SEP.fullmatch(rest)
+            if not typed:
+                continue          # "Test 2 - Drums" is not a chart for a region named "Test"
+            sheet_type = typed.group(1)
+        if found.end() > best_end:
+            best_end, best = found.end(), (sheet_type, [name])
+        elif found.end() == best_end and best[0].casefold() == sheet_type.casefold() and name not in best[1]:
+            best[1].append(name)  # two regions that differ only in case/punctuation
+    return (best[1], best[0]) if best else None
 
 
 def find_pdfs(folder: str) -> list:
@@ -84,24 +131,22 @@ def page_count(path: str) -> int:
 
 
 def list_sheets(project_path: str, regions: list) -> dict:
-    """{"folder", "sheets": [{"file", "name", "pages", "region_names"}], "unmatched": [file names]}.
+    """{"folder", "sheets": [{"file", "name", "type", "pages", "region_names"}], "unmatched": [file names]}.
     `file` is the path relative to the project folder (forward slashes), which
-    is all the page endpoint needs to find it again. `unmatched` is every PDF
-    that named no region — worth showing, since 'why isn't my chart showing up'
-    is almost always a name that doesn't line up with a region."""
+    is all the page endpoint needs to find it again. `type` is the sheet type
+    from "{region} - {type}.pdf" ("" for a file named exactly like the region).
+    Sheets come back ordered by type, so a song's options always appear in the
+    same order. `unmatched` is every PDF that named no region — worth showing,
+    since 'why isn't my chart showing up' is almost always a name that doesn't
+    line up."""
     folder = os.path.dirname(project_path) if project_path else ""
     if not folder:
         return {"folder": "", "sheets": [], "unmatched": []}
-    names_by_key = {}
-    for region in regions:
-        key = name_key(region.get("name", ""))
-        if key:
-            names_by_key.setdefault(key, []).append(region.get("name", ""))
     sheets, unmatched = [], []
     for path in find_pdfs(folder):
         base = os.path.basename(path)
-        region_names = names_by_key.get(name_key(base))
-        if not region_names:
+        matched = match_file(base, regions)
+        if not matched:
             unmatched.append(base)
             continue
         try:
@@ -109,12 +154,15 @@ def list_sheets(project_path: str, regions: list) -> dict:
         except Exception:
             unmatched.append(base)   # unreadable / not really a PDF
             continue
+        region_names, sheet_type = matched
         sheets.append({
             "file": os.path.relpath(path, folder).replace("\\", "/"),
             "name": base,
+            "type": sheet_type,
             "pages": pages,
             "region_names": region_names,
         })
+    sheets.sort(key=lambda s: (s["type"].casefold(), s["name"].casefold()))
     return {"folder": folder, "sheets": sheets, "unmatched": unmatched}
 
 

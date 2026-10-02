@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ImageButton
@@ -56,6 +57,11 @@ class MainActivity : AppCompatActivity() {
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        // Always fetch the page and its scripts fresh. This app is only a window onto
+        // a companion on the same LAN (or USB cable), so the HTTP cache buys nothing
+        // — and a stale copy of the page is how a phone ends up running an old UI
+        // (e.g. missing a feature) long after the companion was updated.
+        webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
                 spinner.visibility = View.GONE

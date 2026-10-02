@@ -28,7 +28,7 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.14"
+APP_VERSION = "1.0.15"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -275,6 +275,12 @@ class MidiSendCCRequest(BaseModel):
     channel: int = 0
 
 # ── API ───────────────────────────────────────────────────────────────────────
+@api.get("/version")
+async def version():
+    """What the web app shows in its footer, so it's obvious which companion a
+    phone is actually talking to."""
+    return {"version": APP_VERSION}
+
 @api.get("/health")
 async def health():
     import platform
@@ -707,11 +713,11 @@ async def service_worker():
         "self.addEventListener('fetch', e => e.respondWith(fetch(e.request).catch(() => new Response('', {status: 503}))));\n"
     )
     return Response(content=sw, media_type="application/javascript",
-                    headers={"Service-Worker-Allowed": "/"})
+                    headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
 
 @app.get("/manifest.json")
 async def manifest_json():
-    return JSONResponse({
+    return JSONResponse(headers={"Cache-Control": "no-cache"}, content={
         "name": "Genius SetList Mobile",
         "short_name": "SetList",
         "description": "Control REAPER setlists from your phone",
@@ -741,16 +747,29 @@ API_ROUTES = {"health", "projects", "regions", "transport", "play", "seek", "sto
               "manifest.json", "icons", "sw.js", "midi-devices", "midi-reset", "midi",
               "instructions", "config-status"}
 
+class _HashedAssets(StaticFiles):
+    """Everything under /static is named after its content (main.<hash>.js), so
+    a given URL never changes and can be cached for good — while the HTML shell
+    that points at those names must NOT be (see spa() below)."""
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
 if os.path.isdir(STATIC_PATH):
     sa = os.path.join(STATIC_PATH, "static")
     if os.path.isdir(sa):
-        app.mount("/static", StaticFiles(directory=sa), name="static")
+        app.mount("/static", _HashedAssets(directory=sa), name="static")
     @app.get("/{full_path:path}")
     async def spa(full_path: str):
         if full_path.split("/")[0] in API_ROUTES:
             raise HTTPException(404)
         idx = os.path.join(STATIC_PATH, "index.html")
-        return FileResponse(idx) if os.path.exists(idx) else {"error": "frontend not built"}
+        # no-cache = "ask the server every time" (the shell is ~1 KB, so that's
+        # cheap). Without it a phone's WebView may keep reusing an old copy of this
+        # page — and so the old JS bundle it names — long after the companion has
+        # been updated.
+        return FileResponse(idx, headers={"Cache-Control": "no-cache"}) if os.path.exists(idx) else {"error": "frontend not built"}
 
 # ── Server lifecycle ──────────────────────────────────────────────────────────
 _server_loop: Optional[asyncio.AbstractEventLoop] = None

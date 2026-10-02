@@ -965,6 +965,13 @@ function VUMeter({ label, level: externalLevel }) {
 // ─────────────────────────────────────────────────────────────────────────────
 const SHEET_ZOOMS = [1, 1.5, 2, 3];
 
+// "Bowling For Soup - 1985 · Drums" — the sheet type comes from the file name
+// ("... - drums.pdf"), so tidy its capitalization for the title.
+function sheetTitle(song, sheet) {
+  const type = (sheet.type || "").trim();
+  return type ? `${song} · ${type.charAt(0).toUpperCase()}${type.slice(1)}` : song;
+}
+
 function SheetViewer({ sheet, title, onClose }) {
   const [zoomIdx, setZoomIdx] = useState(0);
   useEffect(() => {
@@ -1032,11 +1039,12 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, companionVersion,
 }) {
   const [viewingSheet, setViewingSheet] = useState(null);
-  // A chart belongs to whichever song carries the region name it matched.
-  const sheetFor = name => (name ? sheets.find(s => s.region_names.includes(name)) : null);
+  // Every chart of a song: the PDFs named "{region} - {type}.pdf" for its region
+  // (the companion has already ordered them by type).
+  const sheetsFor = name => (name ? sheets.filter(s => s.region_names.includes(name)) : []);
   const [showHotkeys, setShowHotkeys] = useState(false);
   const [hotkeys, setHotkeys] = useState(loadHotkeys);
   const [listeningFor, setListeningFor] = useState(null);
@@ -1181,7 +1189,7 @@ function MobileStageView({
         <span className="mstage-dot" style={{ background: live.color }} />
         <span className="mstage-name">{live.name}</span>
         {item.infiniteLoop && <span className="mstage-flag loop">∞</span>}
-        {sheetFor(live.name) && <span className="mstage-flag sheet">SHEET</span>}
+        {sheetsFor(live.name).length > 0 && <span className="mstage-flag sheet">SHEET</span>}
         <span className="mstage-dur">{item.infiniteLoop ? "∞" : dur ? fmt(dur) : ""}</span>
         {progress > 0 && <div className="mstage-prog" style={{ width: `${progress * 100}%` }} />}
       </div>
@@ -1285,15 +1293,18 @@ function MobileStageView({
 
       {selName && (
         <div className="mstage-sel">
-          <div className="mstage-sel-top">
-            <div className="mstage-sel-lbl">SELECTED{selContainer ? ` · ${selContainer}` : ""}</div>
-            {sheetFor(selName) && (
-              <button className="mstage-sheet-btn" onClick={() => setViewingSheet({ sheet: sheetFor(selName), title: selName })}>
-                SHEET
-              </button>
-            )}
-          </div>
+          <div className="mstage-sel-lbl">SELECTED{selContainer ? ` · ${selContainer}` : ""}</div>
           <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
+          {sheetsFor(selName).length > 0 && (
+            <div className="mstage-sel-sheets">
+              {sheetsFor(selName).map(s => (
+                <button key={s.file} className="mstage-sheet-btn"
+                  onClick={() => setViewingSheet({ sheet: s, title: sheetTitle(selName, s) })}>
+                  {s.type || "Sheet"}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1306,6 +1317,7 @@ function MobileStageView({
       <div className="mstage-identity">
         <span className="mstage-identity-text">
           Connected as {getDeviceLabel()}{!canControl && <span className="mstage-view-only"> · VIEW ONLY</span>}
+          {companionVersion && ` · companion v${companionVersion}`}
         </span>
         {canControl && (
           <button className="mstage-hotkeys-btn" onClick={() => setShowHotkeys(true)} title="Hotkeys">⌨</button>
@@ -1539,6 +1551,8 @@ export default function App() {
   // the regions or project change, since that's what decides what matches.
   const [sheets, setSheets] = useState([]);
   const fetchSheetsRef = useRef(null);
+  // Shown in the Stage footer: which companion this device is really talking to.
+  const [companionVersion, setCompanionVersion] = useState("");
   async function fetchSheets() {
     try {
       const data = await fetch(`${API}/sheet-music`).then(r => r.json());
@@ -1552,7 +1566,10 @@ export default function App() {
   function connectWS() {
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
-    ws.onopen  = () => { setWsConnected(true); fetchProjectsRef.current?.(); fetchSheetsRef.current?.(); };
+    ws.onopen  = () => {
+      setWsConnected(true); fetchProjectsRef.current?.(); fetchSheetsRef.current?.();
+      fetch(`${API}/version`).then(r => r.json()).then(d => setCompanionVersion(d.version || "")).catch(() => {});
+    };
     ws.onclose = () => {
       setWsConnected(false);
       setReaperConnected(false);
@@ -3340,6 +3357,7 @@ export default function App() {
           canControl={canControl}
           onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={playNext} onPrev={playPrev}
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
+          companionVersion={companionVersion}
         />
       )}
 
