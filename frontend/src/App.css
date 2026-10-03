@@ -1958,3 +1958,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .hdr-btn.hdr-launch:not(:disabled):hover { background: var(--green); color: #000; }
 .hdr-btn.hdr-launch:disabled { opacity: .35; cursor: not-allowed; }
 .narrow .hdr-btn.hdr-launch { padding: 8px 10px; margin-left: auto; }
+
+/* The REAPER bridge script is older than this companion's copy */
+.mstage-reaper-status { flex-wrap: wrap; }
+.mstage-bridge-note { display: block; width: 100%; text-align: center; margin-top: 2px; font-size: 11px; letter-spacing: .04em; text-transform: none; font-weight: 600; opacity: .85; }

@@ -1269,7 +1269,7 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, companionVersion, onSheetViewerChange,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, bridgeOutdated, companionVersion, onSheetViewerChange,
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
@@ -1583,6 +1583,9 @@ function MobileStageView({
       <div className={`mstage-reaper-status mstage-reaper-${reaperState}`}>
         <span className="mstage-reaper-dot" />
         {reaperLabel}
+        {reaperState === "live" && bridgeOutdated && (
+          <span className="mstage-bridge-note">Restart genius_bridge.lua in REAPER to update it</span>
+        )}
       </div>
 
       <div className="mstage-setprog"><div className="mstage-setprog-fill" style={{ width: `${setPct}%` }} /></div>
@@ -1989,6 +1992,9 @@ export default function App() {
   // the regions or project change, since that's what decides what matches.
   const [sheets, setSheets] = useState([]);
   const [sheetPreload, setSheetPreload] = useState({ done: 0, total: 0 });
+  // The genius_bridge.lua running in REAPER is older than the one this companion ships (it
+  // only picks up a new copy when restarted) — some features, like beat-aligned song changes, need the new one.
+  const [bridgeOutdated, setBridgeOutdated] = useState(false);
   const [sheetsEnabled, setSheetsEnabled] = useState(() => loadSheetPrefs().enabled);
   useEffect(() => {
     const sync = () => setSheetsEnabled(loadSheetPrefs().enabled);
@@ -2037,6 +2043,7 @@ export default function App() {
         setPosition(m.position);
       }
       if (m.peaks      !== undefined) setTrackPeaks(m.peaks);
+      if (m.bridge_latest !== undefined) setBridgeOutdated((m.bridge_version || 0) < m.bridge_latest);
       // Sync playback selection from another client (e.g. mobile)
       if (m.type === "playback_state" && m.item_id) {
         const idx = playbackItemsRef.current.findIndex(i => i.id === m.item_id);
@@ -2494,7 +2501,10 @@ export default function App() {
   }
 
   // ── Playback ───────────────────────────────────────────────────────────────
-  async function playItem(item, index, childIndex = -1, updateFocus = true) {
+  // quantize: when something is already playing, the bridge waits for the next quarter
+  // note before jumping to this song. Automatic advance at a song's end passes false —
+  // that jump is already due on the song's last beat, and waiting could slip past it.
+  async function playItem(item, index, childIndex = -1, updateFocus = true, quantize = true) {
     if (!canControl) return; // view-only device — tray revoked Play/Stop
     const targetItem = childIndex >= 0 ? item.children[childIndex] : item;
     const live = getLiveItem(targetItem);
@@ -2519,7 +2529,7 @@ export default function App() {
     try {
       await fetch(`${API}/play`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ region_id: targetItem.region_id, start: live.start, end: live.end, item_id: item.id, child_index: childIndex }),
+        body: JSON.stringify({ region_id: targetItem.region_id, start: live.start, end: live.end, item_id: item.id, child_index: childIndex, quantize }),
       });
     } catch(e) { console.error(e); }
   }
@@ -2562,7 +2572,7 @@ export default function App() {
   function playNext(follow = false) {
     const items = playbackItemsRef.current;
     const n = currentIndexRef.current + 1;
-    if (n < items.length) playItem(items[n], n, -1, follow === true);
+    if (n < items.length) playItem(items[n], n, -1, follow === true, follow === true);
     else { stopPlayback(); setCurrentIndex(-1); }
   }
 
@@ -2675,7 +2685,7 @@ export default function App() {
     if (item.isFolder && currentChildIndex === -1 && (item.children || []).length > 0) {
       if (!item.keycommand) {
         // Non-keycommand folder: auto-play selected child
-        playItem(item, currentIndex, item.selectedChildIdx ?? 0, false);
+        playItem(item, currentIndex, item.selectedChildIdx ?? 0, false, false);
       }
       // keycommand folders wait for key press, do nothing here
     } else if (currentChildIndex >= 0) {
@@ -3943,6 +3953,7 @@ export default function App() {
           onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={() => stepSong(1)} onPrev={() => stepSong(-1)}
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
           sheetPreload={sheetPreload}
+          bridgeOutdated={bridgeOutdated}
           onSheetViewerChange={setSheetFull}
           companionVersion={companionVersion}
         />

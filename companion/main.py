@@ -28,8 +28,12 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.25"
+APP_VERSION = "1.0.26"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
+# The genius_bridge.lua in this build reports itself as this version (bridge_version in
+# genius_state.json). REAPER keeps running whatever copy of the script it loaded, so after
+# an update the bridge has to be restarted in REAPER — the page says so while it reports less.
+BRIDGE_VERSION = 4
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
@@ -94,7 +98,7 @@ def bridge_connected() -> bool:
     except OSError:
         return False
 
-def send_command(action: int = 0, pos: float = None, loop_pos: float = None) -> bool:
+def send_command(action: int = 0, pos: float = None, loop_pos: float = None, quantize: bool = False) -> bool:
     cmd = {"id": str(uuid.uuid4())}
     if action:
         cmd["action"] = action
@@ -102,6 +106,10 @@ def send_command(action: int = 0, pos: float = None, loop_pos: float = None) -> 
         cmd["pos"] = pos
     if loop_pos is not None:
         cmd["loop_pos"] = loop_pos
+    if quantize:
+        # Song change while REAPER is playing: the bridge waits for the next quarter note
+        # before jumping (bridge v4+; an older bridge ignores this and jumps at once).
+        cmd["quantize"] = True
     try:
         with open(CMD_FILE, "w", encoding="utf-8") as f:
             json.dump(cmd, f, separators=(',', ':'))
@@ -262,6 +270,7 @@ class PlayRequest(BaseModel):
     region_id: str; start: float; end: float
     item_id: Optional[str] = None
     child_index: Optional[int] = None
+    quantize: bool = True   # change song on the next quarter note when something is playing
 
 class SeekRequest(BaseModel):
     pos: float
@@ -368,7 +377,7 @@ async def seek(req: SeekRequest):
 async def play(req: PlayRequest):
     global _last_playback
     if bridge_connected():
-        send_command(pos=req.start, action=1007)
+        send_command(pos=req.start, action=1007, quantize=req.quantize)
     msg = {"type": "playback_state", "is_playing": True,
            "region_id": req.region_id, "position": req.start,
            "item_id": req.item_id, "child_index": req.child_index}
@@ -647,7 +656,9 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device:
                         break
             await websocket.send_json({"type": "transport", "reaper_connected": True,
                                        "is_playing": is_playing, "position": position,
-                                       "peaks": peaks, "region_id": active_region_id})
+                                       "peaks": peaks, "region_id": active_region_id,
+                                       "bridge_version": state.get("bridge_version", 0),
+                                       "bridge_latest": BRIDGE_VERSION})
 
             slow_tick += 1
             if slow_tick >= 62:

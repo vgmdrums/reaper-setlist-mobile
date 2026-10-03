@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v3
+-- Genius SetList Bridge Script v4 (song changes land on the next quarter note)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -162,12 +162,58 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
+    '{"bridge_version":4,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),
     collect_regions(), collect_tracks(), collect_peaks(), collect_midi_devices())
 end
+
+-- ── Song changes on the beat ────────────────────────────────────────────────
+-- When a song change arrives while REAPER is playing, don't jump at once: wait for the
+-- next quarter note of what's playing and seek then, so the new song's first beat lands
+-- exactly on a beat of the old one. (Stopped or paused: nothing to line up with, so the
+-- change happens straight away, as before.)
+local pending_jump = nil   -- { pos = <project seconds to jump to>, at = <time_precise() to issue the seek> }
+
+-- Returns true if the jump is now scheduled, false if the caller should just do it now.
+local function schedule_quantized_jump(pos)
+  local ok, scheduled = pcall(function()
+    if (reaper.GetPlayState() & 1) ~= 1 then return false end
+    local now  = reaper.GetPlayPosition()                 -- what you're hearing right now
+    local rate = reaper.Master_GetPlayRate(0)
+    if not rate or rate <= 0 then rate = 1 end
+    -- The seek is heard one output-latency after it's issued, so issue it that much early.
+    local latency = reaper.GetOutputLatency() or 0
+    if latency < 0 or latency > 0.5 then latency = 0 end
+    local next_qn = math.floor(reaper.TimeMap2_timeToQN(0, now)) + 1
+    local wait = 0
+    for _ = 1, 3 do
+      local t_beat = reaper.TimeMap2_QNToTime(0, next_qn)
+      wait = (t_beat - now) / rate - latency
+      if wait >= 0.01 then break end   -- too close to catch this beat — take the next one
+      next_qn = next_qn + 1
+    end
+    if wait < 0 then wait = 0 end
+    pending_jump = { pos = pos, at = reaper.time_precise() + wait }
+    return true
+  end)
+  return ok and scheduled or false
+end
+
+-- Called every tick. REAPER's defer loop only runs ~30x a second, which would put the
+-- jump up to ~30 ms off the beat — so once it's due within the next tick or so, wait out
+-- the last few milliseconds right here.
+local function service_pending_jump()
+  if not pending_jump then return end
+  if (reaper.GetPlayState() & 1) ~= 1 then pending_jump = nil; return end   -- stopped in the meantime
+  if pending_jump.at - reaper.time_precise() > 0.05 then return end
+  while reaper.time_precise() < pending_jump.at do end
+  local pos = pending_jump.pos
+  pending_jump = nil
+  reaper.SetEditCurPos(pos, true, true)   -- seek the playing transport
+end
+-- ────────────────────────────────────────────────────────────────────────────
 
 local function process_command()
   local raw = read_file(CMD_FILE)
@@ -186,6 +232,16 @@ local function process_command()
   local pos      = raw:match('"pos":([%d%.%-]+)')
   local action   = raw:match('"action":(%d+)')
   local loop_pos = raw:match('"loop_pos":([%d%.%-]+)')
+  local quantize = raw:match('"quantize":true') ~= nil
+
+  -- A new command (stop, another song, a loop seek...) replaces a jump still waiting for its beat.
+  pending_jump = nil
+
+  -- Song change while playing: line it up with the next quarter note (and we're already playing).
+  if quantize and pos and schedule_quantized_jump(tonumber(pos)) then
+    write_file(CMD_FILE, "")
+    return
+  end
 
   if loop_pos then
     -- Seek to loop start; if Reaper already stopped at region end, restart playback
@@ -215,6 +271,7 @@ local function process_command()
 end
 
 local function tick()
+  service_pending_jump()
   process_command()
   if _should_quit then return end  -- stop deferring; Reaper releases the file
   reaper.SetExtState("GeniusSetList", "heartbeat", tostring(os.time()), false)
