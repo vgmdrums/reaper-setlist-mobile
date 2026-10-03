@@ -1968,7 +1968,14 @@ export default function App() {
       const m = JSON.parse(e.data);
       if (m.reaper_connected !== undefined) setReaperConnected(m.reaper_connected);
       if (m.is_playing !== undefined) { reaperIsPlayingRef.current = m.is_playing; setIsPlaying(m.is_playing); }
-      if (m.position   !== undefined) setPosition(m.position);
+      if (m.position   !== undefined) {
+        // A real update inside the song we just started (not the server echoing our own
+        // play request) means REAPER has caught up.
+        const t = playTargetRef.current;
+        if (awaitingFreshPosRef.current && t && m.type !== "playback_state"
+            && m.position >= t.start - 1 && m.position < t.end - 0.1) awaitingFreshPosRef.current = false;
+        setPosition(m.position);
+      }
       if (m.peaks      !== undefined) setTrackPeaks(m.peaks);
       // Sync playback selection from another client (e.g. mobile)
       if (m.type === "playback_state" && m.item_id) {
@@ -2432,6 +2439,8 @@ export default function App() {
     const targetItem = childIndex >= 0 ? item.children[childIndex] : item;
     const live = getLiveItem(targetItem);
     positionConfirmedRef.current = false; // require position to settle before gate can fire
+    awaitingFreshPosRef.current = true;
+    playTargetRef.current = { start: live.start, end: live.end, at: Date.now() };
     setCurrentIndex(index);
     setCurrentChildIndex(childIndex);
     if (updateFocus) {
@@ -2505,6 +2514,19 @@ export default function App() {
     playItem(items[firstIdx], firstIdx);
   }
 
+  // The Next / Prev arrows (and their hotkeys). Playing: go to the next/previous song
+  // and play it. Stopped or paused: only move the selection — nothing starts.
+  function stepSong(dir) {
+    const items = playbackItemsRef.current;
+    if (isPlayingRef.current) { if (dir > 0) playNext(true); else playPrev(); return; }
+    const base = focusedIndexRef.current >= 0 ? focusedIndexRef.current : currentIndexRef.current;
+    const target = base < 0 ? (dir > 0 ? 0 : -1) : base + dir;
+    if (target < 0 || target >= items.length) return;
+    setFocusedIndex(target);
+    setFocusedNestedItemId(null);
+    setFocusedSCItemId(null);
+  }
+
   function playPrev() {
     const items = playbackItemsRef.current;
     const p = currentIndexRef.current - 1;
@@ -2535,6 +2557,14 @@ export default function App() {
   // Prevents a stale WebSocket position (from the previous item) from triggering advance
   // immediately after advancing to a duplicate song (same region, same end time).
   const positionConfirmedRef = useRef(false);
+  // playItem() sets the position optimistically to the new song's start, then REAPER's
+  // old position can still arrive for a moment. With back-to-back regions that stale
+  // position (the song we just left, a second or so in) sits right after the NEW
+  // song's end, so it looked like "the song just ended" and auto-advanced straight
+  // back — Prev appeared to do nothing. So after a play request the position isn't
+  // trusted until a real update lands inside the new song (or 3 s pass).
+  const awaitingFreshPosRef = useRef(false);
+  const playTargetRef = useRef(null);   // { start, end, at } of the song just started
 
   // Auto-advance / region-end stop
   useEffect(() => {
@@ -2553,7 +2583,9 @@ export default function App() {
     // Before the trigger window: reset gate and confirm position
     if (position < live.end - triggerOffset) {
       autoAdvanceFiredRef.current = false;
-      positionConfirmedRef.current = true; // position is genuinely inside this region
+      const t = playTargetRef.current;
+      const awaiting = awaitingFreshPosRef.current && t && Date.now() - t.at < 3000;
+      if (!awaiting) positionConfirmedRef.current = true; // position is genuinely inside this region
       return;
     }
     // Well past the end: reset gate (seek may have overshot)
@@ -3277,6 +3309,9 @@ export default function App() {
     }
   }, [position]);
 
+  // Where Next/Prev start from: the playing song, or — when stopped — the selected one.
+  const navIndex = isPlaying ? currentIndex : (focusedIndex >= 0 ? focusedIndex : currentIndex);
+
   // Back gesture closes the topmost overlay (registered in the order they open);
   // an admin in Edit mode goes back to Stage before anything leaves the app.
   useBackClose(isAdmin && mode === "edit", () => setMode("stage"));
@@ -3838,7 +3873,7 @@ export default function App() {
           setFocusedIndex={setFocusedIndex} setFocusedSCItemId={setFocusedSCItemId} setFocusedNestedItemId={setFocusedNestedItemId}
           playItem={playItem} clickTrackIdx={clickTrackIdx} mainTrackIdx={mainTrackIdx} trackPeaks={trackPeaks}
           canControl={canControl}
-          onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={() => playNext(true)} onPrev={playPrev}
+          onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={() => stepSong(1)} onPrev={() => stepSong(-1)}
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
           sheetPreload={sheetPreload}
           onSheetViewerChange={setSheetFull}
@@ -3895,7 +3930,7 @@ export default function App() {
             title={canControl ? "Launch Show — go to Stage view and play from top" : "This device is view-only"}>
             LAUNCH SHOW
           </button>
-          <button className="t-btn" onClick={playPrev} disabled={!canControl || currentIndex <= 0} title="Prev">⏮</button>
+          <button className="t-btn" onClick={() => stepSong(-1)} disabled={!canControl || navIndex <= 0} title="Prev">⏮</button>
           {(() => {
             const selIsPlaying = isPlaying && !focusedSCItemId && focusedIndex === currentIndex;
             return (
@@ -3908,7 +3943,7 @@ export default function App() {
             );
           })()}
           <button className="t-btn t-stop" onClick={stopPlayback} disabled={!canControl || !isPlaying} title="Stop">■</button>
-          <button className="t-btn" onClick={playNext} disabled={!canControl || currentIndex >= playbackItems.length-1} title="Next">⏭</button>
+          <button className="t-btn" onClick={() => stepSong(1)} disabled={!canControl || navIndex >= playbackItems.length-1} title="Next">⏭</button>
         </div>
 
         <div className="t-right">
