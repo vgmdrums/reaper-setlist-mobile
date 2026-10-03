@@ -1127,8 +1127,9 @@ function loadSheetPrefs() {
       types: Array.isArray(p.types) ? p.types.map(t => String(t).toLowerCase()) : [],
       scroll: !!p.scroll,
       scrollWait: p.scrollWait == null ? SCROLL_WAIT_DEFAULT : clampScrollWait(p.scrollWait),
+      invert: !!p.invert,   // dark mode: light-on-dark charts
     };
-  } catch { return { auto: false, types: [], scroll: false, scrollWait: SCROLL_WAIT_DEFAULT }; }
+  } catch { return { auto: false, types: [], scroll: false, scrollWait: SCROLL_WAIT_DEFAULT, invert: false }; }
 }
 
 // After the user scrolls the chart by hand, auto-scroll leaves it alone this long
@@ -1163,7 +1164,7 @@ function prioritizeSheets(list, typeOptions, preferred) {
 
 // Fills the stage area (not the whole screen) so the transport bar underneath
 // stays on screen and usable while a chart is up.
-function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, autoScroll }) {
+function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, autoScroll, invert, onToggleInvert }) {
   const [zoomIdx, setZoomIdx] = useState(0);
   const bodyRef = useRef(null);
   const handsOffUntil = useRef(0);
@@ -1191,9 +1192,11 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
   }, [onClose]);
   const pageSrc = n => sheetPageCache.get(sheetPageKey(sheet.file, sheet.v, n))?.url || sheetPageUrl(sheet.file, sheet.v, n);
   return (
-    <div className="sheet-viewer">
+    <div className={`sheet-viewer${invert ? " inverted" : ""}`}>
       <div className="sheet-viewer-hdr">
         <span className="sheet-viewer-title">{song}</span>
+        <button className={`sheet-viewer-btn${invert ? " on" : ""}`} onClick={onToggleInvert}
+          aria-label="Dark mode" aria-pressed={!!invert} title="Invert colors (dark mode)">☾</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === 0}
           onClick={() => setZoomIdx(i => i - 1)} aria-label="Zoom out">−</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === SHEET_ZOOMS.length - 1}
@@ -1638,7 +1641,8 @@ function MobileStageView({
       {showViewer && (
         <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
           onPick={file => setViewing(v => ({ ...v, file }))} onClose={() => setViewing(null)} nextSong={nextForViewer}
-          autoScroll={autoScroll} />
+          autoScroll={autoScroll} invert={sheetPrefs.invert}
+          onToggleInvert={() => updateSheetPrefs({ invert: !sheetPrefs.invert })} />
       )}
 
       {/* So whoever's running the show can glance at a phone and know which
@@ -1662,6 +1666,11 @@ function MobileStageView({
             </div>
             <div className="modal-body">
               <div className="settings-section-title">SHEET MUSIC</div>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.invert} onChange={e => updateSheetPrefs({ invert: e.target.checked })} />
+                <span>Invert sheet music colors (dark mode)</span>
+              </label>
+              <p className="sd-hint">White-on-black charts, easier on the eyes on a dark stage. Also on the ☾ button above any chart.</p>
               <label className="settings-check">
                 <input type="checkbox" checked={sheetPrefs.auto} onChange={e => updateSheetPrefs({ auto: e.target.checked })} />
                 <span>Automatically show sheet music</span>

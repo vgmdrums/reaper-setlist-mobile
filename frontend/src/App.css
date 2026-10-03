@@ -1942,3 +1942,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 }
 .song-search-row:active { background: var(--bg4); }
 .song-search-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Sheet music dark mode: invert the page, hue-rotate back so colored marks keep their hue ── */
+.sheet-viewer.inverted .sheet-viewer-body { background: #000; }
+.sheet-viewer.inverted .sheet-viewer-page { filter: invert(1) hue-rotate(180deg); }
+.sheet-viewer-btn.on { border-color: var(--green); color: var(--green); background: rgba(46,204,113,.15); }
