@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v4 (song changes land on the next quarter note)
+-- Genius SetList Bridge Script v5 (song changes land on the next quarter note)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -162,7 +162,7 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":4,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
+    '{"bridge_version":5,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),
@@ -174,6 +174,12 @@ end
 -- next quarter note of what's playing and seek then, so the new song's first beat lands
 -- exactly on a beat of the old one. (Stopped or paused: nothing to line up with, so the
 -- change happens straight away, as before.)
+--
+-- The jump itself is stop -> move cursor -> play, NOT a seek of the running transport:
+-- a seek would be subject to REAPER's own "smooth seek" preference, which then holds the
+-- jump until ITS boundary (next measure, end of the region...) on top of our wait — so the
+-- change would land late. Stopping first takes smooth seek out of the picture, and the
+-- quarter note is the only boundary that applies.
 local pending_jump = nil   -- { pos = <project seconds to jump to>, at = <time_precise() to issue the seek> }
 
 -- Returns true if the jump is now scheduled, false if the caller should just do it now.
@@ -211,7 +217,9 @@ local function service_pending_jump()
   while reaper.time_precise() < pending_jump.at do end
   local pos = pending_jump.pos
   pending_jump = nil
-  reaper.SetEditCurPos(pos, true, true)   -- seek the playing transport
+  reaper.Main_OnCommand(1016, 0)           -- stop
+  reaper.SetEditCurPos(pos, true, false)   -- cursor to the new song (stopped, so no smooth seek)
+  reaper.Main_OnCommand(1007, 0)           -- play from there
 end
 -- ────────────────────────────────────────────────────────────────────────────
 

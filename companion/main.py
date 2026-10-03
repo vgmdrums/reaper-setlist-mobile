@@ -28,12 +28,12 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.26"
+APP_VERSION = "1.0.27"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 # The genius_bridge.lua in this build reports itself as this version (bridge_version in
 # genius_state.json). REAPER keeps running whatever copy of the script it loaded, so after
 # an update the bridge has to be restarted in REAPER — the page says so while it reports less.
-BRIDGE_VERSION = 4
+BRIDGE_VERSION = 5
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
@@ -108,7 +108,7 @@ def send_command(action: int = 0, pos: float = None, loop_pos: float = None, qua
         cmd["loop_pos"] = loop_pos
     if quantize:
         # Song change while REAPER is playing: the bridge waits for the next quarter note
-        # before jumping (bridge v4+; an older bridge ignores this and jumps at once).
+        # before jumping (bridge v5+; an older bridge ignores this and jumps at once).
         cmd["quantize"] = True
     try:
         with open(CMD_FILE, "w", encoding="utf-8") as f:
