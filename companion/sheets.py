@@ -28,7 +28,7 @@ import pypdfium2 as pdfium
 _pdfium_lock = threading.Lock()
 
 _SCAN_TTL = 15      # seconds a folder listing is reused (Google Drive folders are slow to list)
-_PNG_CACHE_MAX = 24
+_PNG_CACHE_MAX = 300   # rendered pages kept (~100-300 KB each) — a whole setlist's charts, so a second device is instant too
 
 _scan_cache = {}    # folder -> (scanned_at, [pdf paths])
 _pages_cache = {}   # (path, mtime) -> page count
@@ -178,6 +178,7 @@ def list_sheets(project_path: str, regions: list, default_folder: str = "") -> d
                 "name": base,
                 "type": sheet_type,
                 "pages": pages,
+                "v": int(_mtime(path)),   # changes when the file does — lets clients cache its pages for good
                 "region_names": region_names,
             })
     sheets.sort(key=lambda s: (s["type"].casefold(), s["name"].casefold()))

@@ -976,7 +976,63 @@ function VUMeter({ label, level: externalLevel }) {
 // screen and the body scrolls sideways, which works the same on any device
 // (pinch-zoom isn't dependable inside a WebView).
 // ─────────────────────────────────────────────────────────────────────────────
+// Back gesture / back button. Anything that opens over the page (a drawer, the
+// chart viewer, Settings, a confirm dialog) registers how to close itself here, and
+// the Android app calls window.__geniusBack() on a back press (see MainActivity):
+// it closes the topmost one and answers true, or answers false when nothing is open
+// so the app can do its own back (leave the app).
+const backStack = [];
+window.__geniusBack = () => {
+  const top = backStack[backStack.length - 1];
+  if (!top) return false;
+  top.close();
+  return true;
+};
+function useBackClose(open, close) {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!open) return undefined;
+    const entry = { close: () => closeRef.current() };
+    backStack.push(entry);
+    return () => { const i = backStack.indexOf(entry); if (i >= 0) backStack.splice(i, 1); };
+  }, [open]);
+}
+
 const SHEET_ZOOMS = [1, 1.5, 2, 3];
+
+// Every chart page, fetched ahead of time and kept in memory as a blob, so a chart
+// opens instantly instead of waiting for the companion to render it. (The Android
+// app runs its WebView with the HTTP cache off, so a plain <img> prefetch wouldn't
+// stick; a blob URL does.) Keyed by file + modified-time + page, so an edited PDF
+// is fetched again.
+const sheetPageCache = new Map();   // "file|v|n" -> { url: blob URL, img: decoded <img> }
+const sheetPageKey = (file, v, n) => `${file}|${v || 0}|${n}`;
+const sheetPageInflight = new Map();   // key -> promise of a fetch already under way
+function loadSheetPage(sh, n) {
+  const key = sheetPageKey(sh.file, sh.v, n);
+  let p = sheetPageInflight.get(key);
+  if (!p) {
+    p = (async () => {
+      const resp = await fetch(sheetPageUrl(sh.file, sh.v, n));
+      if (!resp.ok) throw new Error(String(resp.status));
+      const url = URL.createObjectURL(await resp.blob());
+      if (sheetPageCache.has(key)) { URL.revokeObjectURL(url); return; }
+      const img = new Image();
+      img.src = url;
+      await img.decode().catch(() => {});          // decoded now, not when it's first shown
+      sheetPageCache.set(key, { url, img });
+    })().finally(() => sheetPageInflight.delete(key));
+    sheetPageInflight.set(key, p);
+  }
+  return p;
+}
+function sheetPageUrl(file, v, n) {
+  // An <img>/fetch of this can't use the Authorization header the rest of the app
+  // does, so the token rides in the query string (the companion accepts either).
+  return `${API}/sheet-music/page?file=${encodeURIComponent(file)}&n=${n}&v=${v || 0}`
+    + (PAIR_TOKEN ? `&token=${encodeURIComponent(PAIR_TOKEN)}` : "");
+}
 const SHEET_PREFS_KEY = "stageSheetPrefs";
 // Types the Settings checkboxes always offer; any other type found in the
 // project's PDFs (say "piano") is offered too.
@@ -1007,6 +1063,24 @@ function loadSheetPrefs() {
 // (ms) before following the song again.
 const SCROLL_HANDS_OFF_MS = 6000;
 
+// The scroll should be finished this long (seconds) before the song's region ends,
+// so the whole chart has been on screen for the last stretch of the song.
+const SCROLL_FINISH_LEAD = 30;
+// ...but never squeeze a short song's scroll into less than this (seconds).
+const SCROLL_MIN_SPAN = 10;
+
+// How far down the chart should be (0..1) `elapsed` seconds into a song `duration`
+// long, with auto-scroll waiting `wait` seconds before it starts: still until
+// `wait`, then a steady scroll that reaches the bottom SCROLL_FINISH_LEAD seconds
+// before the song ends. A song too short for that still gets a scroll of at least
+// SCROLL_MIN_SPAN (or, if it's shorter than the wait plus that, until its end).
+function sheetScrollProgress(elapsed, duration, wait) {
+  const finishAt = Math.max(duration - SCROLL_FINISH_LEAD, Math.min(duration, wait + SCROLL_MIN_SPAN));
+  const span = finishAt - wait;
+  if (span <= 0) return 0;
+  return Math.max(0, Math.min(1, (elapsed - wait) / span));
+}
+
 // A song's charts with the preferred types first, in the order Settings lists
 // them; everything else after, in the order the companion sent it.
 function prioritizeSheets(list, typeOptions, preferred) {
@@ -1025,13 +1099,12 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
   // auto-scroll on. The chart's scroll position is a pure function of the song's
   // position — nothing for the wait to "run" separately — so seeking, pausing and
   // resuming all just work: nothing moves for `wait` seconds, then the chart
-  // travels top-to-bottom so its end lines up with the end of the song.
+  // travels top-to-bottom, arriving at the bottom SCROLL_FINISH_LEAD seconds before the song ends.
   useEffect(() => {
     const el = bodyRef.current;
     if (!autoScroll || !el || Date.now() < handsOffUntil.current) return;
     const { elapsed, duration, wait } = autoScroll;
-    const span = duration - wait;
-    const p = span > 0 ? Math.max(0, Math.min(1, (elapsed - wait) / span)) : 0;
+    const p = sheetScrollProgress(elapsed, duration, wait);
     const max = el.scrollHeight - el.clientHeight;
     if (max > 0) el.scrollTop = p * max;
   }, [autoScroll]);
@@ -1044,10 +1117,7 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  // An <img> can't send the Authorization header the rest of the app uses, so
-  // the token rides in the query string (the companion accepts either).
-  const pageSrc = n => `${API}/sheet-music/page?file=${encodeURIComponent(sheet.file)}&n=${n}`
-    + (PAIR_TOKEN ? `&token=${encodeURIComponent(PAIR_TOKEN)}` : "");
+  const pageSrc = n => sheetPageCache.get(sheetPageKey(sheet.file, sheet.v, n))?.url || sheetPageUrl(sheet.file, sheet.v, n);
   return (
     <div className="sheet-viewer">
       <div className="sheet-viewer-hdr">
@@ -1121,7 +1191,7 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, companionVersion,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, sheetPreload, companionVersion,
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
@@ -1191,8 +1261,10 @@ function MobileStageView({
   // On the Android app, its overlay menu (reload / re-pair / fullscreen) sits
   // exactly where the viewer's close button is — hide it while a chart is up.
   // No-op in a browser, where there's no such bridge.
-  useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!showViewer); }, [showViewer]);
+  useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!showViewer && !showSettings); }, [showViewer, showSettings]);
   useEffect(() => () => window.GeniusAndroid?.setMenuVisible?.(true), []);
+  useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
+  useBackClose(showViewer, () => setViewing(null));
 
   // Auto-scroll only follows the song that's actually playing (viewing another
   // song's chart while one plays leaves it alone).
@@ -1477,13 +1549,15 @@ function MobileStageView({
         <span className="mstage-identity-text">
           Connected as {getDeviceLabel()}{!canControl && <span className="mstage-view-only"> · VIEW ONLY</span>}
           {companionVersion && ` · companion v${companionVersion}`}
+          {sheetPreload.total > 0 && (sheetPreload.done < sheetPreload.total
+            ? ` · loading sheets ${sheetPreload.done}/${sheetPreload.total}` : " · sheets ready")}
         </span>
         <button className="mstage-settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
       </div>
 
       {showSettings && (
-        <div className="overlay" onClick={() => { setShowSettings(false); setListeningFor(null); }}>
-          <div className="new-sl-modal" onClick={e => e.stopPropagation()}>
+        <div className="overlay settings-overlay">
+          <div className="new-sl-modal settings-screen">
             <div className="modal-hdr">
               <span>SETTINGS — THIS DEVICE</span>
               <button className="fm-close" onClick={() => { setShowSettings(false); setListeningFor(null); }}>✕</button>
@@ -1525,9 +1599,9 @@ function MobileStageView({
                 <span>seconds</span>
               </label>
               <p className="sd-hint">
-                While a song plays, its chart holds still for this long, then scrolls on its own so
-                the bottom arrives as the song ends. Touching the chart pauses the scrolling for a
-                few seconds.
+                While a song plays, its chart holds still for this long, then scrolls on its own and
+                reaches the bottom about 30 seconds before the song ends, so all of it is on screen
+                for the last stretch. Touching the chart pauses the scrolling for a few seconds.
               </p>
               {canControl && (<>
               <div className="settings-section-title">HOTKEYS</div>
@@ -1751,13 +1825,15 @@ export default function App() {
   // PDF charts named after a region (companion/sheets.py). Re-fetched whenever
   // the regions or project change, since that's what decides what matches.
   const [sheets, setSheets] = useState([]);
+  const [sheetPreload, setSheetPreload] = useState({ done: 0, total: 0 });
   const fetchSheetsRef = useRef(null);
   // Shown in the Stage footer: which companion this device is really talking to.
   const [companionVersion, setCompanionVersion] = useState("");
   async function fetchSheets() {
     try {
       const data = await fetch(`${API}/sheet-music`).then(r => r.json());
-      setSheets(Array.isArray(data.sheets) ? data.sheets : []);
+      const next = Array.isArray(data.sheets) ? data.sheets : [];
+      setSheets(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     } catch (e) { /* offline — keep whatever we had */ }
   }
   useEffect(() => { fetchSheetsRef.current = fetchSheets; });
@@ -3072,6 +3148,64 @@ export default function App() {
     }
   }, [position]);
 
+  // Back gesture closes the topmost overlay (registered in the order they open);
+  // an admin in Edit mode goes back to Stage before anything leaves the app.
+  useBackClose(isAdmin && mode === "edit", () => setMode("stage"));
+  useBackClose(showFileMenu, () => setShowFileMenu(false));
+  useBackClose(showProject, () => setShowProject(false));
+  useBackClose(showConsole, () => setShowConsole(false));
+  useBackClose(showDrawer, () => setShowDrawer(false));
+  useBackClose(showNewSetlist, () => setShowNewSetlist(false));
+  useBackClose(showInstructions, () => setShowInstructions(false));
+  useBackClose(showWelcome, () => setShowWelcome(false));
+  useBackClose(!!confirmDlg, () => setConfirmDlg(null));
+
+  // Preload every chart page (see sheetPageCache). Songs come in setlist order,
+  // this device's preferred types first, so what's needed soonest lands first.
+  // Re-runs whenever the chart list or the setlist changes; pages already held are skipped.
+  const preloadRun = useRef(0);
+  const sheetNames = [];
+  (function walk(list) { for (const it of list || []) { sheetNames.push(it.name); walk(it.children); } })(setlistItems);
+  const sheetOrderKey = sheetNames.join("\u0001");
+  useEffect(() => {
+    const run = ++preloadRun.current;
+    const names = sheetNames;
+    const prefTypes = loadSheetPrefs().types;
+    const songRank = sh => {
+      let best = Infinity;
+      for (const rn of sh.region_names) { const i = names.indexOf(rn); if (i >= 0 && i < best) best = i; }
+      return best;
+    };
+    const typeRank = sh => { const i = prefTypes.indexOf((sh.type || "").toLowerCase()); return i < 0 ? prefTypes.length : i; };
+    const ordered = [...sheets].sort((a, b) => (songRank(a) - songRank(b)) || (typeRank(a) - typeRank(b)));
+
+    const wanted = new Set(), jobs = [];
+    for (const sh of ordered) {
+      for (let n = 0; n < sh.pages; n++) {
+        const key = sheetPageKey(sh.file, sh.v, n);
+        wanted.add(key);
+        if (!sheetPageCache.has(key)) jobs.push({ sh, n, key });
+      }
+    }
+    for (const [key, entry] of sheetPageCache) {       // charts that are gone or were edited
+      if (!wanted.has(key)) { URL.revokeObjectURL(entry.url); sheetPageCache.delete(key); }
+    }
+    const total = wanted.size;
+    let done = total - jobs.length, next = 0;
+    setSheetPreload({ done, total });
+
+    async function worker() {
+      while (run === preloadRun.current && next < jobs.length) {
+        const { sh, n } = jobs[next++];
+        try { await loadSheetPage(sh, n); }
+        catch (e) { /* offline or REAPER not connected — the viewer falls back to loading it live */ }
+        done++;
+        if (run === preloadRun.current) setSheetPreload({ done, total });
+      }
+    }
+    worker(); worker();   // two at a time: the companion renders one page at a time anyway
+  }, [sheets, sheetOrderKey]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
@@ -3576,6 +3710,7 @@ export default function App() {
           canControl={canControl}
           onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={playNext} onPrev={playPrev}
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
+          sheetPreload={sheetPreload}
           companionVersion={companionVersion}
         />
       )}

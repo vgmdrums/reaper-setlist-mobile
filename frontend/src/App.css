@@ -1902,3 +1902,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 
 /* region rows: play + add are always visible, not hover-only */
 .region-row .row-add, .region-row .row-play { opacity: 1; }
+
+/* ── Settings: a full screen of its own, header and DONE always in view ── */
+.overlay.settings-overlay { align-items: stretch; justify-content: stretch; background: var(--bg); backdrop-filter: none; z-index: 150; }
+.settings-overlay .settings-screen {
+  position: static; transform: none; width: 100%; max-width: none; height: 100%;
+  border: none; border-radius: 0; box-shadow: none; background: var(--bg);
+  display: flex; flex-direction: column;
+}
+.settings-overlay .settings-screen .modal-hdr { flex-shrink: 0; height: 56px; padding-right: 64px; /* clear of the Android menu button's corner */ }
+.settings-overlay .settings-screen .modal-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 24px; }
+.settings-overlay .settings-screen .modal-footer { flex-shrink: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+.settings-overlay .settings-screen .modal-confirm { min-height: 48px; min-width: 120px; }
+.settings-overlay .settings-screen .fm-close { min-width: 44px; min-height: 44px; font-size: 20px; }

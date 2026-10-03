@@ -12,6 +12,7 @@ import android.webkit.WebViewClient
 import android.widget.ImageButton
 import android.widget.PopupMenu
 import android.widget.ProgressBar
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -86,6 +87,8 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { menuButton.visibility = if (visible) View.VISIBLE else View.GONE }
             }
         }, "GeniusAndroid")
+
+        onBackPressedDispatcher.addCallback(this, backCallback)
 
         menuButton.setOnClickListener { anchor ->
             PopupMenu(this, anchor).apply {
@@ -164,8 +167,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    /** Back button / back gesture. On current Android a bare onBackPressed() override
+     * is no longer called for gesture navigation, so this is a proper callback: it asks
+     * the page to close whatever it has open on top (Settings, a chart, a drawer...,
+     * see window.__geniusBack in the web app); if the page had nothing to close, go
+     * back in the page's history, and failing that leave the app as usual. */
+    private val backCallback = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            webView.evaluateJavascript("window.__geniusBack ? window.__geniusBack() : false") { handled ->
+                if (handled == "true") return@evaluateJavascript
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        }
     }
 
     /** Hides the status/nav bars — a swipe from the edge reveals them

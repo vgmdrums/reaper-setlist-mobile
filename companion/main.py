@@ -28,7 +28,7 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.17"
+APP_VERSION = "1.0.18"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
@@ -519,7 +519,7 @@ def sheet_music_list():
     return sheets.list_sheets(state.get("proj_path") or "", state.get("regions") or [], pairing.get_sheet_folder())
 
 @api.get("/sheet-music/page")
-def sheet_music_page(file: str, n: int = 0, scale: float = 2.0):
+def sheet_music_page(file: str, n: int = 0, scale: float = 2.0, v: int = 0):
     """One page of a chart as a PNG. Reachable with ?token= as well as the
     Authorization header, since an <img> tag can't send headers."""
     if not bridge_connected():
@@ -533,7 +533,10 @@ def sheet_music_page(file: str, n: int = 0, scale: float = 2.0):
         raise HTTPException(404, "No such page")
     except Exception as e:
         raise HTTPException(422, f"Couldn't read that PDF ({e})")
-    return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
+    # `v` is the file's modified time (from /sheet-music), so a URL that carries it
+    # never changes meaning — safe for a client to keep for good.
+    cache = "private, max-age=31536000, immutable" if v else "private, max-age=300"
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": cache})
 
 @api.post("/install-bridge")
 async def install_bridge_endpoint():
