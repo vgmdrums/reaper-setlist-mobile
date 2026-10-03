@@ -1915,3 +1915,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .settings-overlay .settings-screen .modal-footer { flex-shrink: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
 .settings-overlay .settings-screen .modal-confirm { min-height: 48px; min-width: 120px; }
 .settings-overlay .settings-screen .fm-close { min-width: 44px; min-height: 44px; font-size: 20px; }
+
+/* ── Chart open: the whole screen is the chart, plus the transport controls ── */
+.sheet-full .app-header,
+.sheet-full .project-tabs { display: none; }
+.sheet-full .transport-bar { grid-template-columns: 1fr; grid-template-areas: "center"; height: auto; padding: 6px 10px; }
+.sheet-full .t-left, .sheet-full .t-right { display: none; }
+.sheet-full .t-center { grid-area: center; justify-content: center; }
+.narrow.mode-stage.sheet-full .transport-bar { min-height: 0; padding: 6px 10px; gap: 0; }
+.narrow.mode-stage.sheet-full .t-center .t-btn { min-height: 56px; font-size: 14px; }
+.narrow.mode-stage.sheet-full .t-center .t-play { font-size: 17px; }

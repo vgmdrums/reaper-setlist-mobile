@@ -1191,7 +1191,7 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, sheetPreload, companionVersion,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, sheetPreload, companionVersion, onSheetViewerChange,
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
@@ -1263,6 +1263,11 @@ function MobileStageView({
   // No-op in a browser, where there's no such bridge.
   useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!showViewer && !showSettings); }, [showViewer, showSettings]);
   useEffect(() => () => window.GeniusAndroid?.setMenuVisible?.(true), []);
+  // While a chart is open the App hides everything but the transport bar (see .sheet-full).
+  useEffect(() => {
+    onSheetViewerChange?.(showViewer);
+    return () => onSheetViewerChange?.(false);
+  }, [showViewer]);
   useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
   useBackClose(showViewer, () => setViewing(null));
 
@@ -1847,6 +1852,7 @@ export default function App() {
   // the regions or project change, since that's what decides what matches.
   const [sheets, setSheets] = useState([]);
   const [sheetPreload, setSheetPreload] = useState({ done: 0, total: 0 });
+  const [sheetFull, setSheetFull] = useState(false);   // a chart is open: it gets the whole screen but the transport bar
   const fetchSheetsRef = useRef(null);
   // Shown in the Stage footer: which companion this device is really talking to.
   const [companionVersion, setCompanionVersion] = useState("");
@@ -3233,7 +3239,7 @@ export default function App() {
   // Render
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className={`app mode-${mode}${narrow ? " narrow" : ""}${window.GeniusAndroid ? " android" : ""}`}>
+    <div className={`app mode-${mode}${narrow ? " narrow" : ""}${window.GeniusAndroid ? " android" : ""}${sheetFull ? " sheet-full" : ""}`}>
 
       {/* ── Header ── */}
       <header className="app-header">
@@ -3734,6 +3740,7 @@ export default function App() {
           onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={() => playNext(true)} onPrev={playPrev}
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
           sheetPreload={sheetPreload}
+          onSheetViewerChange={setSheetFull}
           companionVersion={companionVersion}
         />
       )}
