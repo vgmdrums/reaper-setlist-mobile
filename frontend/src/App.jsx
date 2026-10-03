@@ -868,6 +868,78 @@ function RegionsDrawer({ regions, loading, search, setSearch, highlightedIdx, se
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Song search (transport bar ⌕): pick any region of the project; it's inserted after
+// the selected song and played. Full screen; with nothing typed it lists the songs
+// this device picked most recently.
+// ─────────────────────────────────────────────────────────────────────────────
+const RECENT_SONGS_KEY = "stageRecentSongs";
+const RECENT_SONGS_MAX = 20;
+function loadRecentSongs() {
+  try {
+    const a = JSON.parse(localStorage.getItem(RECENT_SONGS_KEY) || "[]");
+    return Array.isArray(a) ? a.filter(x => typeof x === "string") : [];
+  } catch { return []; }
+}
+
+// `newItem` goes right after the item with id `targetId` — at the top level or inside
+// the section that holds it — or at the very end when there's no such item.
+function insertAfterItem(items, targetId, newItem) {
+  const top = items.findIndex(i => i.id === targetId);
+  if (top >= 0) return [...items.slice(0, top + 1), newItem, ...items.slice(top + 1)];
+  let found = false;
+  const next = items.map(it => {
+    if (!it.isContainer) return it;
+    const ci = (it.children || []).findIndex(c => c.id === targetId);
+    if (ci < 0) return it;
+    found = true;
+    return { ...it, children: [...it.children.slice(0, ci + 1), newItem, ...it.children.slice(ci + 1)] };
+  });
+  return found ? next : [...items, newItem];
+}
+
+function SongSearch({ regions, recentNames, onChoose, onClose }) {
+  const [query, setQuery] = useState("");
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const byName = new Map(regions.map(r => [r.name, r]));
+  const list = words.length
+    ? regions.filter(r => words.every(w => r.name.toLowerCase().includes(w))).slice(0, 100)
+    : recentNames.map(n => byName.get(n)).filter(Boolean);
+  return (
+    <div className="overlay settings-overlay song-search">
+      <div className="new-sl-modal settings-screen">
+        <div className="modal-hdr">
+          <span>FIND A SONG</span>
+          <button className="fm-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="song-search-box">
+          <span className="search-icon">⌕</span>
+          <input className="search-input" autoFocus value={query} spellCheck={false}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && list[0]) onChoose(list[0]); }}
+            placeholder="Search songs…" />
+          {query && <button className="search-clear" onClick={() => setQuery("")}>✕</button>}
+        </div>
+        <div className="modal-body song-search-list">
+          <div className="settings-section-title">{words.length ? `${list.length} MATCH${list.length === 1 ? "" : "ES"}` : "RECENT"}</div>
+          <p className="sd-hint">Pick a song to add it after the selected song and play it.</p>
+          {list.length === 0 ? (
+            <div className="mstage-empty">
+              {words.length ? "No songs match" : regions.length ? "No recent songs yet — type to search" : "No songs — REAPER has no regions to pick from"}
+            </div>
+          ) : list.map(r => (
+            <button key={r.id} className="song-search-row" onClick={() => onChoose(r)}>
+              <span className="mstage-dot" style={{ background: r.color }} />
+              <span className="song-search-name">{r.name}</span>
+              <span className="mstage-dur">{fmt(r.end - r.start)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VU Meter — vertical audio level meter with track selector
@@ -1748,6 +1820,8 @@ export default function App() {
   const [showProject,   setShowProject]  = useState(false);
   const [showConsole,   setShowConsole]  = useState(false);
   const [showDrawer,    setShowDrawer]   = useState(false);
+  const [showSongSearch, setShowSongSearch] = useState(false);
+  const [recentSongs, setRecentSongs] = useState(loadRecentSongs);
   const [confirmDlg,    setConfirmDlg]   = useState(null);   // {title, message, confirmLabel, onConfirm}
   const [narrow,        setNarrow]       = useState(false);
   const [showNewSetlist, setShowNewSetlist] = useState(false);
@@ -3016,6 +3090,23 @@ export default function App() {
     setShowFileMenu(false);
   }
 
+  // Transport ⌕: put `region` right after the selected song (or the playing one, or
+  // at the end) and start it. Remembered, newest first, for the search's recent list.
+  function chooseSong(region) {
+    setShowSongSearch(false);
+    setRecentSongs(prev => {
+      const next = [region.name, ...prev.filter(n => n !== region.name)].slice(0, RECENT_SONGS_MAX);
+      try { localStorage.setItem(RECENT_SONGS_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
+      return next;
+    });
+    const pb = playbackItemsRef.current;
+    const anchorItem = (focusedIndex >= 0 ? pb[focusedIndex] : null) || (currentIndex >= 0 ? pb[currentIndex] : null);
+    const newItem = { ...region, id: uid(), region_id: region.id, region_index: region.index };
+    const at = anchorItem ? pb.findIndex(p => p.id === anchorItem.id) + 1 : pb.length;
+    mutateSetlist(items => insertAfterItem(items, anchorItem?.id, newItem));
+    playItem(newItem, at);
+  }
+
   // Clicking a region in the Regions panel adds it (the panel stays put, so several
   // can be added in a row); the row flashes a check for a moment.
   const [panelFlashId, setPanelFlashId] = useState(null);
@@ -3187,6 +3278,7 @@ export default function App() {
   useBackClose(showNewSetlist, () => setShowNewSetlist(false));
   useBackClose(showInstructions, () => setShowInstructions(false));
   useBackClose(showWelcome, () => setShowWelcome(false));
+  useBackClose(showSongSearch, () => setShowSongSearch(false));
   useBackClose(!!confirmDlg, () => setConfirmDlg(null));
 
   // Preload every chart page (see sheetPageCache). Songs come in setlist order,
@@ -3786,6 +3878,9 @@ export default function App() {
         </div>
 
         <div className="t-center">
+          {isAdmin && canControl && activeSetlist && (
+            <button className="t-btn t-search" onClick={() => setShowSongSearch(true)} title="Find a song">⌕</button>
+          )}
           <button className="t-btn t-launch" onClick={launchShow}
             disabled={!canControl || !activeSetlist || playbackItems.length === 0}
             title={canControl ? "Launch Show — go to Stage view and play from top" : "This device is view-only"}>
@@ -3854,6 +3949,11 @@ export default function App() {
           reaperConnected={reaperConnected}
           onClose={() => setShowDrawer(false)}
           listRef={regionListRef} onKeyDown={handleSearchKey} />
+      )}
+
+      {showSongSearch && (
+        <SongSearch regions={regions} recentNames={recentSongs}
+          onChoose={chooseSong} onClose={() => setShowSongSearch(false)} />
       )}
 
       {confirmDlg && (
