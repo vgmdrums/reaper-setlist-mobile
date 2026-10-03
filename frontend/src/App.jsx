@@ -1266,6 +1266,27 @@ function MobileStageView({
   useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
   useBackClose(showViewer, () => setViewing(null));
 
+  // Keep the song you're on in view as the arrows (or auto-advance, or a tap) move
+  // through the list: the SELECTED row when the selection moves, the PLAYING row when
+  // playback moves. A section that was collapsed over it is opened first.
+  const stageListRef = useRef(null);
+  function revealRow(id) {
+    if (!id) return undefined;
+    const parent = setlistItems.find(si => si.isContainer
+      && (si.children || []).some(c => c.id === id || (c.children || []).some(l => l.id === id)));
+    if (parent && stageCollapsed.has(parent.id)) toggleStageCollapsed(parent.id);
+    // after the render that opens the section
+    const t = setTimeout(() => {
+      stageListRef.current?.querySelector(`[data-row-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+    }, 60);
+    return () => clearTimeout(t);
+  }
+  useEffect(() => {
+    const id = focusedIndex >= 0 ? playbackItems[focusedIndex]?.id : (focusedNestedItemId || focusedSCItemId);
+    return revealRow(id);
+  }, [focusedIndex, focusedNestedItemId, focusedSCItemId]);
+  useEffect(() => revealRow(playingLeaf?.id), [currentIndex, currentChildIndex]);
+
   // Auto-scroll only follows the song that's actually playing (viewing another
   // song's chart while one plays leaves it alone).
   const liveSong = playingLeaf ? getLiveItem(playingLeaf) : null;
@@ -1409,7 +1430,7 @@ function MobileStageView({
     const cls = "mstage-row" + (sub ? " sub" : "")
       + (isCurrent && isFocused ? " sel-play" : isCurrent ? " playing" : isFocused ? " selected" : "");
     return (
-      <div key={item.id} className={cls}
+      <div key={item.id} data-row-id={item.id} className={cls}
         onClick={() => tapLeaf(pbIdx, item, sub ? kcNum : -1, isFocused, () => {
           if (sub) { setFocusedNestedItemId(item.id); setFocusedIndex(-1); }
           else { setFocusedIndex(pbIdx); }
@@ -1453,7 +1474,7 @@ function MobileStageView({
         </div>
       )}
 
-      <div className="mstage-list">
+      <div className="mstage-list" ref={stageListRef}>
         {!activeSetlist ? (
           <div className="mstage-empty">No setlist loaded</div>
         ) : playbackItems.length === 0 ? (
@@ -2378,10 +2399,12 @@ export default function App() {
     } catch(e) { console.error(e); }
   }
 
-  function playNext() {
+  // follow: the selection moves to the new song too (the Next arrow / hotkey, as Prev
+  // always did). Auto-advance leaves the selection where the user put it.
+  function playNext(follow = false) {
     const items = playbackItemsRef.current;
     const n = currentIndexRef.current + 1;
-    if (n < items.length) playItem(items[n], n, -1, false);
+    if (n < items.length) playItem(items[n], n, -1, follow === true);
     else { stopPlayback(); setCurrentIndex(-1); }
   }
 
@@ -3708,7 +3731,7 @@ export default function App() {
           setFocusedIndex={setFocusedIndex} setFocusedSCItemId={setFocusedSCItemId} setFocusedNestedItemId={setFocusedNestedItemId}
           playItem={playItem} clickTrackIdx={clickTrackIdx} mainTrackIdx={mainTrackIdx} trackPeaks={trackPeaks}
           canControl={canControl}
-          onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={playNext} onPrev={playPrev}
+          onPlayPause={handleTransportPlayPause} onStop={stopPlayback} onNext={() => playNext(true)} onPrev={playPrev}
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
           sheetPreload={sheetPreload}
           companionVersion={companionVersion}
