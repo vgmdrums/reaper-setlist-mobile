@@ -1188,6 +1188,15 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
   const waitLeft = autoScroll && autoScroll.elapsed < autoScroll.wait
     ? Math.ceil(autoScroll.wait - autoScroll.elapsed) : 0;
   const sheet = sheets.find(s => s.file === activeFile) || sheets[0];
+  // A different song (or sheet) always opens at the top, at the left edge, with auto-scroll's
+  // hands-off timer cleared — whatever the previous chart was scrolled to.
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (!openedRef.current) { openedRef.current = true; return; }   // a freshly opened chart is already at the top (or placed by auto-scroll)
+    handsOffUntil.current = 0;
+    const el = bodyRef.current;
+    if (el) { el.scrollTop = 0; el.scrollLeft = 0; }
+  }, [song, sheet.file]);
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
