@@ -1344,7 +1344,7 @@ function MobileStageView({
     return () => onSheetViewerChange?.(false);
   }, [showViewer]);
   useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
-  useBackClose(showViewer, () => setViewing(null));
+  useBackClose(showViewer, () => closeViewer());
 
   // Keep the song you're on in view as the arrows (or auto-advance, or a tap) move
   // through the list: the SELECTED row when the selection moves, the PLAYING row when
@@ -1493,6 +1493,44 @@ function MobileStageView({
     }
   }
 
+  // An open chart follows the song: Next/Prev (stopped, they only move the selection) or
+  // playback moving on switch it to the new song's chart — the same sheet type when the
+  // song has it, else its first — and a song with no chart closes the viewer.
+  // When it closed itself on a song with no chart, it reopens at the next song that has
+  // one (resumeTypeRef holds the sheet type it was on) — unless the user closed it.
+  const resumeTypeRef = useRef(null);
+  function followSong(name) {
+    if (!name) return;
+    if (!viewing) {
+      if (resumeTypeRef.current === null) return;
+      const list = prioritizedSheetsFor(name);
+      if (!list.length) return;
+      const same = list.find(sh => (sh.type || "").toLowerCase() === resumeTypeRef.current);
+      resumeTypeRef.current = null;
+      setViewing({ song: name, file: (same || list[0]).file });
+      return;
+    }
+    if (viewing.song === name) return;
+    const list = prioritizedSheetsFor(name);
+    const curType = (viewerSheets.find(sh => sh.file === viewing.file)?.type || "").toLowerCase();
+    if (!list.length) { resumeTypeRef.current = curType; setViewing(null); return; }
+    const same = list.find(sh => (sh.type || "").toLowerCase() === curType);
+    setViewing({ song: name, file: (same || list[0]).file });
+  }
+  function closeViewer() { resumeTypeRef.current = null; setViewing(null); }
+  const lastSelRef = useRef(selName);
+  const lastPlayRef = useRef(playingName);
+  useEffect(() => {
+    if (lastSelRef.current === selName) return;
+    lastSelRef.current = selName;
+    followSong(selName);
+  }, [selName]);
+  useEffect(() => {
+    if (lastPlayRef.current === playingName) return;
+    lastPlayRef.current = playingName;
+    if (isPlaying && !sheetPrefs.auto) followSong(playingName);   // "auto show" does its own switching
+  }, [playingName]);
+
   // Tap-once-to-select, tap-again-to-play — mobile.html's exact row behavior;
   // there's no double-tap gesture to lean on like the desktop mouse UI does.
   function tapLeaf(pbIdx, item, childIndex, isFocused, focus) {
@@ -1625,22 +1663,24 @@ function MobileStageView({
         <div className="mstage-sel">
           <div className="mstage-sel-lbl">SELECTED{selContainer ? ` · ${selContainer}` : ""}</div>
           <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
-          {sheetsFor(selName).length > 0 && (
-            <div className="mstage-sel-sheets">
-              {prioritizedSheetsFor(selName).map(sh => (
+          {/* Always one row of chips, so the bar (and the song name) never changes size
+              between songs: a placeholder chip stands in when there's no sheet music. */}
+          <div className="mstage-sel-sheets">
+            {sheetsFor(selName).length > 0
+              ? prioritizedSheetsFor(selName).map(sh => (
                 <button key={sh.file} className="mstage-sheet-btn"
                   onClick={() => setViewing({ song: selName, file: sh.file })}>
                   {sh.type || "Sheet"}
                 </button>
-              ))}
-            </div>
-          )}
+              ))
+              : <span className="mstage-sheet-btn none">(no sheet music)</span>}
+          </div>
         </div>
       )}
 
       {showViewer && (
         <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
-          onPick={file => setViewing(v => ({ ...v, file }))} onClose={() => setViewing(null)} nextSong={nextForViewer}
+          onPick={file => setViewing(v => ({ ...v, file }))} onClose={closeViewer} nextSong={nextForViewer}
           autoScroll={autoScroll} invert={sheetPrefs.invert}
           onToggleInvert={() => updateSheetPrefs({ invert: !sheetPrefs.invert })} />
       )}

@@ -1947,3 +1947,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .sheet-viewer.inverted .sheet-viewer-body { background: #000; }
 .sheet-viewer.inverted .sheet-viewer-page { filter: invert(1) hue-rotate(180deg); }
 .sheet-viewer-btn.on { border-color: var(--green); color: var(--green); background: rgba(46,204,113,.15); }
+
+/* placeholder chip: same box as a real one, just dim and not tappable */
+.mstage-sheet-btn.none { opacity: .45; border-style: dashed; cursor: default; pointer-events: none; text-transform: none; }
