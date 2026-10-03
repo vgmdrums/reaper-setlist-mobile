@@ -1816,10 +1816,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .narrow.mode-stage .t-right {
   order: 2; width: 100%; flex-direction: row; align-items: center; justify-content: center; gap: 10px;
 }
-.narrow.mode-stage .t-center {
-  order: 3; width: 100%; display: flex; gap: 6px;
-}
-.narrow.mode-stage .t-launch { display: none; } /* redundant once already in Stage view */
+.narrow.mode-stage .t-controls { order: 3; width: 100%; }
+.narrow.mode-stage .t-center { flex: 1; min-width: 0; display: flex; gap: 6px; }
+.narrow.mode-stage .t-controls .t-side .t-btn.t-search { height: 80px; }
 .narrow.mode-stage .t-center .t-btn {
   flex: 1; min-height: 80px; font-size: 15px; flex-direction: column; gap: 4px;
 }
@@ -1876,11 +1875,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 }
 .narrow .t-left { grid-area: left; min-width: 0; }
 .narrow .t-right { grid-area: right; }
-.narrow .t-center { grid-area: center; gap: 6px; }
+.narrow .t-controls { grid-area: center; }
+.narrow .t-center { flex: 1; min-width: 0; gap: 6px; }
 .narrow .t-center .t-btn { min-width: 0; padding: 0 4px; }
 .narrow .t-center .t-btn:not(.t-play):not(.t-launch) { flex: 0 0 44px; width: 44px; height: 44px; }
 .narrow .t-center .t-play { flex: 1 1 0; height: 44px; }
-.narrow .t-center .t-launch { flex: 1.2 1 0; height: 44px; padding: 0 6px; }
 .narrow .np-name { max-width: 100%; }
 
 /* setlist rows: name keeps a readable width, buttons drop to a second line if needed */
@@ -1919,12 +1918,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 /* ── Chart open: the whole screen is the chart, plus the transport controls ── */
 .sheet-full .app-header,
 .sheet-full .project-tabs { display: none; }
-.sheet-full .transport-bar { grid-template-columns: 1fr; grid-template-areas: "center"; height: auto; padding: 6px 10px; }
-.sheet-full .t-left, .sheet-full .t-right { display: none; }
-.sheet-full .t-center { grid-area: center; justify-content: center; }
-.narrow.mode-stage.sheet-full .transport-bar { min-height: 0; padding: 6px 10px; gap: 0; }
-.narrow.mode-stage.sheet-full .t-center .t-btn { min-height: 56px; font-size: 14px; }
-.narrow.mode-stage.sheet-full .t-center .t-play { font-size: 17px; }
 
 /* ── Song search ── */
 .t-search { font-size: 22px; }
@@ -1950,3 +1943,18 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 
 /* placeholder chip: same box as a real one, just dim and not tappable */
 .mstage-sheet-btn.none { opacity: .45; border-style: dashed; cursor: default; pointer-events: none; text-transform: none; }
+
+/* ── Transport row: [search] [ transport ] [spacer] ── */
+.t-controls { display: flex; align-items: center; gap: 6px; }
+.t-controls .t-center { flex: 1 1 auto; min-width: 0; justify-content: center; }
+.t-side { flex: 0 0 44px; width: 44px; display: flex; align-items: center; justify-content: center; }
+.t-controls .t-side .t-btn.t-search { width: 44px; height: 44px; font-size: 22px; padding: 0; }
+
+/* ── Launch Show lives in the header ── */
+.hdr-btn.hdr-launch {
+  font-family: var(--ui); font-weight: 700; font-size: 12px; letter-spacing: .1em; white-space: nowrap;
+  border-color: var(--green); color: var(--green); background: rgba(46,204,113,.1);
+}
+.hdr-btn.hdr-launch:not(:disabled):hover { background: var(--green); color: #000; }
+.hdr-btn.hdr-launch:disabled { opacity: .35; cursor: not-allowed; }
+.narrow .hdr-btn.hdr-launch { padding: 8px 10px; margin-left: auto; }

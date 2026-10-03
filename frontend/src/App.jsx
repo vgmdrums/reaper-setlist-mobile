@@ -1106,6 +1106,8 @@ function sheetPageUrl(file, v, n) {
     + (PAIR_TOKEN ? `&token=${encodeURIComponent(PAIR_TOKEN)}` : "");
 }
 const SHEET_PREFS_KEY = "stageSheetPrefs";
+const SHEET_PREFS_EVENT = "sheetprefs-changed";   // tells the App when the master switch moves
+const NO_SHEETS = [];
 // Types the Settings checkboxes always offer; any other type found in the
 // project's PDFs (say "piano") is offered too.
 const SHEET_TYPE_DEFAULTS = ["drums", "guitar", "lyrics", "bass"];
@@ -1128,8 +1130,9 @@ function loadSheetPrefs() {
       scroll: !!p.scroll,
       scrollWait: p.scrollWait == null ? SCROLL_WAIT_DEFAULT : clampScrollWait(p.scrollWait),
       invert: !!p.invert,   // dark mode: light-on-dark charts
+      enabled: p.enabled !== false,   // the master switch: off hides all sheet music (on by default)
     };
-  } catch { return { auto: false, types: [], scroll: false, scrollWait: SCROLL_WAIT_DEFAULT, invert: false }; }
+  } catch { return { auto: false, types: [], scroll: false, scrollWait: SCROLL_WAIT_DEFAULT, invert: false, enabled: true }; }
 }
 
 // After the user scrolls the chart by hand, auto-scroll leaves it alone this long
@@ -1266,10 +1269,12 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets, sheetPreload, companionVersion, onSheetViewerChange,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, companionVersion, onSheetViewerChange,
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
+  // "Enable sheet music" off: no sheets exist as far as everything below is concerned.
+  const sheets = sheetPrefs.enabled ? allSheets : NO_SHEETS;
   // Every chart of a song: the PDFs named "{region} - {type}.pdf" for its region
   // (the companion has already ordered them by type).
   const sheetsFor = name => (name ? sheets.filter(s => s.region_names.includes(name)) : []);
@@ -1284,11 +1289,10 @@ function MobileStageView({
   }, [sheets]);
   const prioritizedSheetsFor = name => prioritizeSheets(sheetsFor(name), sheetTypeOptions, sheetPrefs.types);
   function updateSheetPrefs(patch) {
-    setSheetPrefs(prev => {
-      const next = { ...prev, ...patch };
-      try { localStorage.setItem(SHEET_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
-      return next;
-    });
+    const next = { ...sheetPrefs, ...patch };
+    setSheetPrefs(next);
+    try { localStorage.setItem(SHEET_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
+    window.dispatchEvent(new Event(SHEET_PREFS_EVENT));
   }
   const [showSettings, setShowSettings] = useState(false);
   const [hotkeys, setHotkeys] = useState(loadHotkeys);
@@ -1665,7 +1669,7 @@ function MobileStageView({
           <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
           {/* Always one row of chips, so the bar (and the song name) never changes size
               between songs: a placeholder chip stands in when there's no sheet music. */}
-          <div className="mstage-sel-sheets">
+          {sheetPrefs.enabled && <div className="mstage-sel-sheets">
             {sheetsFor(selName).length > 0
               ? prioritizedSheetsFor(selName).map(sh => (
                 <button key={sh.file} className="mstage-sheet-btn"
@@ -1674,7 +1678,7 @@ function MobileStageView({
                 </button>
               ))
               : <span className="mstage-sheet-btn none">(no sheet music)</span>}
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1691,7 +1695,7 @@ function MobileStageView({
         <span className="mstage-identity-text">
           Connected as {getDeviceLabel()}{!canControl && <span className="mstage-view-only"> · VIEW ONLY</span>}
           {companionVersion && ` · companion v${companionVersion}`}
-          {sheetPreload.total > 0 && (sheetPreload.done < sheetPreload.total
+          {sheetPrefs.enabled && sheetPreload.total > 0 && (sheetPreload.done < sheetPreload.total
             ? ` · loading sheets ${sheetPreload.done}/${sheetPreload.total}` : " · sheets ready")}
         </span>
         <button className="mstage-settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
@@ -1706,6 +1710,15 @@ function MobileStageView({
             </div>
             <div className="modal-body">
               <div className="settings-section-title">SHEET MUSIC</div>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.enabled} onChange={e => updateSheetPrefs({ enabled: e.target.checked })} />
+                <span>Enable sheet music</span>
+              </label>
+              <p className="sd-hint">
+                Off hides all sheet music — the chips, the chart viewer and the options below —
+                and stops loading charts in the background.
+              </p>
+              {sheetPrefs.enabled && (<>
               <label className="settings-check">
                 <input type="checkbox" checked={sheetPrefs.invert} onChange={e => updateSheetPrefs({ invert: e.target.checked })} />
                 <span>Invert sheet music colors (dark mode)</span>
@@ -1750,6 +1763,7 @@ function MobileStageView({
                 reaches the bottom about 30 seconds before the song ends, so all of it is on screen
                 for the last stretch. Touching the chart pauses the scrolling for a few seconds.
               </p>
+              </>)}
               {canControl && (<>
               <div className="settings-section-title">HOTKEYS</div>
               <p className="sd-hint">
@@ -1975,6 +1989,12 @@ export default function App() {
   // the regions or project change, since that's what decides what matches.
   const [sheets, setSheets] = useState([]);
   const [sheetPreload, setSheetPreload] = useState({ done: 0, total: 0 });
+  const [sheetsEnabled, setSheetsEnabled] = useState(() => loadSheetPrefs().enabled);
+  useEffect(() => {
+    const sync = () => setSheetsEnabled(loadSheetPrefs().enabled);
+    window.addEventListener(SHEET_PREFS_EVENT, sync);
+    return () => window.removeEventListener(SHEET_PREFS_EVENT, sync);
+  }, []);
   const [sheetFull, setSheetFull] = useState(false);   // a chart is open: it gets the whole screen but the transport bar
   const fetchSheetsRef = useRef(null);
   // Shown in the Stage footer: which companion this device is really talking to.
@@ -3382,7 +3402,7 @@ export default function App() {
       return best;
     };
     const typeRank = sh => { const i = prefTypes.indexOf((sh.type || "").toLowerCase()); return i < 0 ? prefTypes.length : i; };
-    const ordered = [...sheets].sort((a, b) => (songRank(a) - songRank(b)) || (typeRank(a) - typeRank(b)));
+    const ordered = sheetsEnabled ? [...sheets].sort((a, b) => (songRank(a) - songRank(b)) || (typeRank(a) - typeRank(b))) : [];
 
     const wanted = new Set(), jobs = [];
     for (const sh of ordered) {
@@ -3409,7 +3429,7 @@ export default function App() {
       }
     }
     worker(); worker();   // two at a time: the companion renders one page at a time anyway
-  }, [sheets, sheetOrderKey]);
+  }, [sheets, sheetOrderKey, sheetsEnabled]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -3428,6 +3448,13 @@ export default function App() {
           </div>
           {isAdmin && activeSetlist && (
             <div className="active-setlist-name">{activeSetlist.name}</div>
+          )}
+          {isAdmin && (
+            <button className="hdr-btn hdr-launch" onClick={launchShow}
+              disabled={!canControl || !activeSetlist || playbackItems.length === 0}
+              title={canControl ? "Launch Show — go to Stage view and play from the top" : "This device is view-only"}>
+              LAUNCH SHOW
+            </button>
           )}
         </div>
 
@@ -3961,15 +3988,16 @@ export default function App() {
           )}
         </div>
 
-        <div className="t-center">
+        {/* Search sits at the left, the transport in the middle; an empty slot of the same
+            width on the right keeps the transport centered (and the same size) whether or
+            not the search button is there. */}
+        <div className="t-controls">
+        <div className="t-side">
           {isAdmin && canControl && activeSetlist && (
             <button className="t-btn t-search" onClick={() => setShowSongSearch(true)} title="Find a song">⌕</button>
           )}
-          <button className="t-btn t-launch" onClick={launchShow}
-            disabled={!canControl || !activeSetlist || playbackItems.length === 0}
-            title={canControl ? "Launch Show — go to Stage view and play from top" : "This device is view-only"}>
-            LAUNCH SHOW
-          </button>
+        </div>
+        <div className="t-center">
           <button className="t-btn" onClick={() => stepSong(-1)} disabled={!canControl || navIndex <= 0} title="Prev">⏮</button>
           {(() => {
             const selIsPlaying = isPlaying && !focusedSCItemId && focusedIndex === currentIndex;
@@ -3984,6 +4012,8 @@ export default function App() {
           })()}
           <button className="t-btn t-stop" onClick={stopPlayback} disabled={!canControl || !isPlaying} title="Stop">■</button>
           <button className="t-btn" onClick={() => stepSong(1)} disabled={!canControl || navIndex >= playbackItems.length-1} title="Next">⏭</button>
+        </div>
+        <div className="t-side" aria-hidden="true" />
         </div>
 
         <div className="t-right">
