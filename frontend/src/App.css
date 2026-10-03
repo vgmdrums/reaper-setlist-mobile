@@ -1832,3 +1832,73 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
   height: 1em; vertical-align: -0.08em;
 }
 .icon-pause span { width: .3em; height: 1em; background: currentColor; border-radius: 1px; display: block; }
+
+/* ── Confirm dialog (replaces window.confirm, which the Android WebView ignores) ── */
+.confirm-overlay { z-index: 400; padding: 16px; }
+.confirm-dlg {
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px;
+  width: 360px; max-width: 100%; padding: 18px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.7);
+}
+.confirm-title { font-family: var(--mono); font-size: 12px; letter-spacing: .18em; color: var(--text2); margin-bottom: 10px; }
+.confirm-msg { font-family: var(--ui); font-size: 17px; line-height: 1.35; color: var(--text); margin-bottom: 18px; word-break: break-word; }
+.confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.confirm-actions button { min-height: 44px; min-width: 96px; }
+.modal-confirm.danger { border-color: var(--accent); color: var(--accent); }
+.modal-confirm.danger:hover { background: var(--accent); color: #fff; }
+
+/* ── Regions drawer: add/play always reachable, drawer stays open ── */
+.rd-added { color: var(--green); }
+.rd-header .fm-close { min-height: 40px; min-width: 40px; }
+.regions-drawer .row-add,
+.regions-drawer .row-play { opacity: 1; width: 40px; height: 40px; }
+.regions-drawer .row-add { font-size: 22px; }
+.regions-drawer .region-row { min-height: 52px; }
+.region-row.added { background: var(--gdim); border-left-color: var(--green); }
+.region-row.added .row-add { border-color: var(--green); color: var(--green); background: var(--gdim); }
+.narrow .row-add, .narrow .row-play { opacity: 1; }
+
+/* ── Small screens: let the toolbars wrap instead of overlapping ── */
+.narrow .app-header {
+  grid-template-columns: 1fr;
+  height: auto; padding: 6px 10px; gap: 6px;
+}
+.narrow .header-left { flex-wrap: wrap; }
+.narrow .header-right { flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.narrow .project-tabs { height: auto; flex-wrap: wrap; row-gap: 4px; padding: 6px 10px; overflow-x: visible; }
+.narrow .panel-hdr { height: auto; min-height: 40px; flex-wrap: wrap; row-gap: 6px; padding: 6px 12px; }
+.narrow .panel-hdr-left, .narrow .panel-hdr-right { flex-wrap: wrap; row-gap: 6px; }
+
+/* transport bar: status on top, controls on their own full-width row */
+.narrow .transport-bar {
+  grid-template-columns: 1fr auto; grid-template-areas: "left right" "center center";
+  height: auto; padding: 6px 10px; gap: 6px 10px;
+}
+.narrow .t-left { grid-area: left; min-width: 0; }
+.narrow .t-right { grid-area: right; }
+.narrow .t-center { grid-area: center; gap: 6px; }
+.narrow .t-center .t-btn { min-width: 0; padding: 0 4px; }
+.narrow .t-center .t-btn:not(.t-play):not(.t-launch) { flex: 0 0 44px; width: 44px; height: 44px; }
+.narrow .t-center .t-play { flex: 1 1 0; height: 44px; }
+.narrow .t-center .t-launch { flex: 1.2 1 0; height: 44px; padding: 0 6px; }
+.narrow .np-name { max-width: 100%; }
+
+/* setlist rows: name keeps a readable width, buttons drop to a second line if needed */
+.narrow .sl-row { flex-wrap: wrap; row-gap: 6px; }
+.narrow .sl-info { flex: 1 1 120px; }
+.narrow .sl-actions { margin-left: auto; flex-wrap: wrap; }
+
+/* ── Sheet auto-scroll ── */
+.sheet-viewer-scrollnote {
+  flex-shrink: 0; margin-left: auto; align-self: center; padding: 4px 8px; border-radius: 3px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em; color: var(--green);
+  border: 1px solid rgba(46,204,113,.4); white-space: nowrap;
+}
+.settings-wait { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 16px; }
+.settings-wait .modal-input { width: 84px; text-align: center; }
+.settings-wait .modal-input:disabled { opacity: .4; }
+/* The Android app floats its own menu button over the top-right corner — keep the header's first row clear of it. */
+.android .header-left { padding-right: 56px; }
+
+/* region rows: play + add are always visible, not hover-only */
+.region-row .row-add, .region-row .row-play { opacity: 1; }

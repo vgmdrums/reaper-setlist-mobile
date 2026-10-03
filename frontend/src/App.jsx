@@ -172,10 +172,10 @@ function DeviceNameGate() {
 // ─────────────────────────────────────────────────────────────────────────────
 // RegionRow (browser panel)
 // ─────────────────────────────────────────────────────────────────────────────
-function RegionRow({ region, highlighted, onClick, onAdd, onPlay }) {
+function RegionRow({ region, highlighted, added, onClick, onAdd, onPlay }) {
   return (
     <div
-      className={`region-row${highlighted ? " hl" : ""}`}
+      className={`region-row${highlighted ? " hl" : ""}${added ? " added" : ""}`}
       style={{ "--rc": region.color }}
       onClick={onClick}
     >
@@ -185,7 +185,7 @@ function RegionRow({ region, highlighted, onClick, onAdd, onPlay }) {
         <span className="region-row-time">{fmt(region.start)}–{fmt(region.end)} · {fmt(region.end - region.start)}</span>
       </div>
       {onPlay && <button className="row-play" onClick={e => { e.stopPropagation(); onPlay(region); }} title="Play in Reaper">▶</button>}
-      <button className="row-add" onClick={e => { e.stopPropagation(); onAdd(region); }} title="Add to setlist">+</button>
+      <button className="row-add" onClick={e => { e.stopPropagation(); onAdd(region); }} title="Add to setlist">{added ? "✓" : "+"}</button>
     </div>
   );
 }
@@ -825,14 +825,27 @@ function ConsoleDrawer({ onClose, onHelp, trackPeaks, clickTrackIdx, mainTrackId
 // Regions Drawer (mobile / narrow)
 // ─────────────────────────────────────────────────────────────────────────────
 function RegionsDrawer({ regions, loading, search, setSearch, highlightedIdx, setHighlightedIdx,
-                          onAdd, onPlaySelected, reaperConnected, onClose, listRef, onKeyDown }) {
+                          onAdd, onPlay, reaperConnected, onClose, listRef, onKeyDown }) {
   const filtered = regions.filter(r => r.name.toLowerCase().includes(search.toLowerCase()));
+  // Tapping a row adds it and the drawer stays open (so several can be added in a
+  // row); the row flashes a ✓ and the header counts what's been added this visit.
+  const [flashId, setFlashId] = useState(null);
+  const [addedCount, setAddedCount] = useState(0);
+  const flashTimer = useRef(null);
+  useEffect(() => () => clearTimeout(flashTimer.current), []);
+  function add(region) {
+    onAdd(region);
+    setAddedCount(n => n + 1);
+    setFlashId(region.id);
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 700);
+  }
   return (
     <div className="overlay" onClick={onClose}>
       <div className="regions-drawer" onClick={e => e.stopPropagation()}>
         <div className="rd-header">
-          <span>REGIONS</span>
-          <button className="fm-close" onClick={onClose}>✕</button>
+          <span>REGIONS{addedCount > 0 && <span className="rd-added"> · {addedCount} ADDED</span>}</span>
+          <button className="fm-close" onClick={onClose}>{addedCount > 0 ? "DONE" : "✕"}</button>
         </div>
         <div className="rd-search">
           <span className="search-icon">⌕</span>
@@ -845,11 +858,11 @@ function RegionsDrawer({ regions, loading, search, setSearch, highlightedIdx, se
           {loading ? <div className="loading"><div className="spinner"/><span>Loading…</span></div>
           : filtered.length === 0 ? <div className="empty-state"><span>No regions found</span></div>
           : filtered.map((r, i) => (
-            <RegionRow key={r.id} region={r} highlighted={i === highlightedIdx}
-              onClick={() => setHighlightedIdx(i)} onAdd={reg => { onAdd(reg); onClose(); }} />
+            <RegionRow key={r.id} region={r} highlighted={i === highlightedIdx} added={r.id === flashId}
+              onClick={() => { setHighlightedIdx(i); add(r); }} onAdd={add} onPlay={onPlay} />
           ))}
         </div>
-        <div className="search-hint">↑↓ navigate · Enter add · Esc close</div>
+        <div className="search-hint">Tap a region to add it · ▶ to play it</div>
       </div>
     </div>
   );
@@ -970,13 +983,29 @@ const SHEET_PREFS_KEY = "stageSheetPrefs";
 const SHEET_TYPE_DEFAULTS = ["drums", "guitar", "lyrics", "bass"];
 
 // Per-device, like the hotkeys: { auto: show a song's chart when it starts
-// playing, types: the sheet types this device prefers }.
+// playing, types: the sheet types this device prefers, scroll: auto-scroll the
+// chart while the song plays, scrollWait: seconds into the song before it starts }.
+const SCROLL_WAIT_DEFAULT = 10;
+const SCROLL_WAIT_MAX = 600;
+function clampScrollWait(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.max(0, Math.min(SCROLL_WAIT_MAX, n)) : SCROLL_WAIT_DEFAULT;
+}
 function loadSheetPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(SHEET_PREFS_KEY) || "{}");
-    return { auto: !!p.auto, types: Array.isArray(p.types) ? p.types.map(t => String(t).toLowerCase()) : [] };
-  } catch { return { auto: false, types: [] }; }
+    return {
+      auto: !!p.auto,
+      types: Array.isArray(p.types) ? p.types.map(t => String(t).toLowerCase()) : [],
+      scroll: !!p.scroll,
+      scrollWait: p.scrollWait == null ? SCROLL_WAIT_DEFAULT : clampScrollWait(p.scrollWait),
+    };
+  } catch { return { auto: false, types: [], scroll: false, scrollWait: SCROLL_WAIT_DEFAULT }; }
 }
+
+// After the user scrolls the chart by hand, auto-scroll leaves it alone this long
+// (ms) before following the song again.
+const SCROLL_HANDS_OFF_MS = 6000;
 
 // A song's charts with the preferred types first, in the order Settings lists
 // them; everything else after, in the order the companion sent it.
@@ -988,8 +1017,27 @@ function prioritizeSheets(list, typeOptions, preferred) {
 
 // Fills the stage area (not the whole screen) so the transport bar underneath
 // stays on screen and usable while a chart is up.
-function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong }) {
+function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, autoScroll }) {
   const [zoomIdx, setZoomIdx] = useState(0);
+  const bodyRef = useRef(null);
+  const handsOffUntil = useRef(0);
+  // autoScroll = { elapsed, duration, wait } while this song is playing with
+  // auto-scroll on. The chart's scroll position is a pure function of the song's
+  // position — nothing for the wait to "run" separately — so seeking, pausing and
+  // resuming all just work: nothing moves for `wait` seconds, then the chart
+  // travels top-to-bottom so its end lines up with the end of the song.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!autoScroll || !el || Date.now() < handsOffUntil.current) return;
+    const { elapsed, duration, wait } = autoScroll;
+    const span = duration - wait;
+    const p = span > 0 ? Math.max(0, Math.min(1, (elapsed - wait) / span)) : 0;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max > 0) el.scrollTop = p * max;
+  }, [autoScroll]);
+  const touchedByHand = () => { handsOffUntil.current = Date.now() + SCROLL_HANDS_OFF_MS; };
+  const waitLeft = autoScroll && autoScroll.elapsed < autoScroll.wait
+    ? Math.ceil(autoScroll.wait - autoScroll.elapsed) : 0;
   const sheet = sheets.find(s => s.file === activeFile) || sheets[0];
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
@@ -1015,8 +1063,12 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong }) {
           <button key={t.file} className={`sheet-viewer-tab${t.file === sheet.file ? " on" : ""}`}
             onClick={() => onPick(t.file)}>{t.type || "Sheet"}</button>
         ))}
+        {autoScroll && (
+          <span className="sheet-viewer-scrollnote">{waitLeft > 0 ? `SCROLL IN ${waitLeft}s` : "AUTO-SCROLL"}</span>
+        )}
       </div>
-      <div className="sheet-viewer-body" key={sheet.file}>
+      <div className="sheet-viewer-body" key={sheet.file} ref={bodyRef}
+        onTouchStart={touchedByHand} onWheel={touchedByHand} onMouseDown={touchedByHand}>
         {Array.from({ length: sheet.pages }, (_, n) => (
           <img key={n} className="sheet-viewer-page" src={pageSrc(n)} alt={`${song}, ${sheet.type || "sheet"}, page ${n + 1}`}
             style={{ width: `${SHEET_ZOOMS[zoomIdx] * 100}%` }} />
@@ -1141,6 +1193,14 @@ function MobileStageView({
   // No-op in a browser, where there's no such bridge.
   useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!showViewer); }, [showViewer]);
   useEffect(() => () => window.GeniusAndroid?.setMenuVisible?.(true), []);
+
+  // Auto-scroll only follows the song that's actually playing (viewing another
+  // song's chart while one plays leaves it alone).
+  const liveSong = playingLeaf ? getLiveItem(playingLeaf) : null;
+  const autoScroll = (showViewer && sheetPrefs.scroll && isPlaying && liveSong && viewing.song === playingName
+    && (liveSong.end - liveSong.start) > 0)
+    ? { elapsed: position - liveSong.start, duration: liveSong.end - liveSong.start, wait: sheetPrefs.scrollWait }
+    : null;
 
   // The viewer's "NEXT" line: the song after the one being viewed.
   const nextForViewer = (() => {
@@ -1407,7 +1467,8 @@ function MobileStageView({
 
       {showViewer && (
         <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
-          onPick={file => setViewing(v => ({ ...v, file }))} onClose={() => setViewing(null)} nextSong={nextForViewer} />
+          onPick={file => setViewing(v => ({ ...v, file }))} onClose={() => setViewing(null)} nextSong={nextForViewer}
+          autoScroll={autoScroll} />
       )}
 
       {/* So whoever's running the show can glance at a phone and know which
@@ -1451,6 +1512,22 @@ function MobileStageView({
               <p className="sd-hint">
                 Checked types are listed first on every song, in the order shown here. With none
                 checked, a song's first chart is the one shown automatically.
+              </p>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.scroll} onChange={e => updateSheetPrefs({ scroll: e.target.checked })} />
+                <span>Auto-scroll sheet music</span>
+              </label>
+              <label className="settings-wait">
+                <span>Wait before scrolling</span>
+                <input type="number" className="modal-input" inputMode="numeric" min="0" max={SCROLL_WAIT_MAX}
+                  disabled={!sheetPrefs.scroll} value={sheetPrefs.scrollWait}
+                  onChange={e => updateSheetPrefs({ scrollWait: e.target.value === "" ? 0 : clampScrollWait(e.target.value) })} />
+                <span>seconds</span>
+              </label>
+              <p className="sd-hint">
+                While a song plays, its chart holds still for this long, then scrolls on its own so
+                the bottom arrives as the song ends. Touching the chart pauses the scrolling for a
+                few seconds.
               </p>
               {canControl && (<>
               <div className="settings-section-title">HOTKEYS</div>
@@ -1571,6 +1648,7 @@ export default function App() {
   const [showProject,   setShowProject]  = useState(false);
   const [showConsole,   setShowConsole]  = useState(false);
   const [showDrawer,    setShowDrawer]   = useState(false);
+  const [confirmDlg,    setConfirmDlg]   = useState(null);   // {title, message, confirmLabel, onConfirm}
   const [narrow,        setNarrow]       = useState(false);
   const [showNewSetlist, setShowNewSetlist] = useState(false);
   const [newSetlistDraft, setNewSetlistDraft] = useState(null);
@@ -2833,21 +2911,41 @@ export default function App() {
     setShowFileMenu(false);
   }
 
-  function renameSetlist(id) {
-    const sl = allSetlists.find(s => s.id === id);
-    const name = prompt("Rename setlist:", sl?.name || "");
-    if (!name) return;
-    const next = allSetlists.map(s => s.id === id ? { ...s, name } : s);
-    setAllSetlists(next);
-    saveAllSetlistsToDisk(next);
+  // Clicking a region in the Regions panel adds it (the panel stays put, so several
+  // can be added in a row); the row flashes a check for a moment.
+  const [panelFlashId, setPanelFlashId] = useState(null);
+  const panelFlashTimer = useRef(null);
+  function addFromPanel(region) {
+    addToSetlist(region);
+    setPanelFlashId(region.id);
+    clearTimeout(panelFlashTimer.current);
+    panelFlashTimer.current = setTimeout(() => setPanelFlashId(null), 700);
   }
 
+  function playRegion(r) {
+    fetch(`${API}/play`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ region_id: r.id, start: r.start, end: r.end }),
+    }).catch(() => {});
+  }
+
+  // The phone app's WebView swallows window.confirm()/prompt() (the call returns
+  // false straight away), so confirmations are an in-app dialog instead.
+  function askConfirm(opts) { setConfirmDlg(opts); }
+
   function deleteSetlist(id) {
-    if (!confirm("Delete this setlist?")) return;
-    const next = allSetlists.filter(s => s.id !== id);
-    setAllSetlists(next);
-    saveAllSetlistsToDisk(next);
-    if (activeSetlistId === id) { setActiveId(next[0]?.id || null); setCurrentIndex(-1); }
+    const sl = allSetlists.find(s => s.id === id);
+    askConfirm({
+      title: "DELETE SETLIST",
+      message: `Delete "${sl?.name || "this setlist"}"? This can't be undone.`,
+      confirmLabel: "DELETE",
+      onConfirm: () => {
+        const next = allSetlists.filter(s => s.id !== id);
+        setAllSetlists(next);
+        saveAllSetlistsToDisk(next);
+        if (activeSetlistId === id) { setActiveId(next[0]?.id || null); setCurrentIndex(-1); }
+      },
+    });
   }
 
   // ── Settings ───────────────────────────────────────────────────────────────
@@ -2978,7 +3076,7 @@ export default function App() {
   // Render
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className={`app mode-${mode}${narrow ? " narrow" : ""}`}>
+    <div className={`app mode-${mode}${narrow ? " narrow" : ""}${window.GeniusAndroid ? " android" : ""}`}>
 
       {/* ── Header ── */}
       <header className="app-header">
@@ -3080,14 +3178,9 @@ export default function App() {
                 <div className="region-list" ref={regionListRef}>
                   {filtered.map((r, i) => (
                     <div key={r.id} data-idx={i}>
-                      <RegionRow key={r.id} region={r} highlighted={i === highlightedIdx}
-                        onClick={() => setHighlightIdx(i)} onAdd={addToSetlist}
-                        onPlay={r => {
-                          fetch(`${API}/play`, {
-                            method: "POST", headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ region_id: r.id, start: r.start, end: r.end }),
-                          }).catch(() => {});
-                        }}
+                      <RegionRow key={r.id} region={r} highlighted={i === highlightedIdx} added={r.id === panelFlashId}
+                        onClick={() => { setHighlightIdx(i); addFromPanel(r); }} onAdd={addFromPanel}
+                        onPlay={playRegion}
                       />
                     </div>
                   ))}
@@ -3131,9 +3224,12 @@ export default function App() {
             </div>
             <div className="panel-hdr-right">
               {mode === "edit" && setlistItems.length > 0 && (
-                <button className="clear-btn" onClick={() => {
-                  if (confirm("Clear setlist?")) { mutateSetlist(() => []); setCurrentIndex(-1); stopPlayback(); }
-                }}>CLEAR</button>
+                <button className="clear-btn" onClick={() => askConfirm({
+                  title: "CLEAR SETLIST",
+                  message: "Remove every song from this setlist?",
+                  confirmLabel: "CLEAR",
+                  onConfirm: () => { mutateSetlist(() => []); setCurrentIndex(-1); stopPlayback(); },
+                })}>CLEAR</button>
               )}
               {mode === "stage" && (
                 <span className="stage-badge">STAGE MODE</span>
@@ -3589,10 +3685,26 @@ export default function App() {
         <RegionsDrawer regions={regions} loading={loadingRegions}
           search={search} setSearch={setSearch}
           highlightedIdx={highlightedIdx} setHighlightedIdx={setHighlightIdx}
-          onAdd={addToSetlist} onPlaySelected={playSelected}
+          onAdd={addToSetlist} onPlay={playRegion}
           reaperConnected={reaperConnected}
           onClose={() => setShowDrawer(false)}
           listRef={regionListRef} onKeyDown={handleSearchKey} />
+      )}
+
+      {confirmDlg && (
+        <div className="overlay confirm-overlay" onClick={() => setConfirmDlg(null)}>
+          <div className="confirm-dlg" role="alertdialog" onClick={e => e.stopPropagation()}>
+            <div className="confirm-title">{confirmDlg.title}</div>
+            <div className="confirm-msg">{confirmDlg.message}</div>
+            <div className="confirm-actions">
+              <button className="modal-cancel" autoFocus onClick={() => setConfirmDlg(null)}>CANCEL</button>
+              <button className="modal-confirm danger"
+                onClick={() => { const fn = confirmDlg.onConfirm; setConfirmDlg(null); fn(); }}>
+                {confirmDlg.confirmLabel || "OK"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── New Setlist Modal ── */}
