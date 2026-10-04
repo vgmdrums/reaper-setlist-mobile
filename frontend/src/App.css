@@ -2028,3 +2028,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 }
 .mstage-live-dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); animation: live-flash 1s ease-in-out infinite; }
 @keyframes live-flash { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
+/* the search button's holder must not squeeze it into an oval */
+.app:not(.narrow) .t-controls .t-side:first-child { width: auto; flex: 0 0 auto; }
+.android:not(.narrow) .t-controls .t-side .t-btn.t-search { flex: 0 0 auto; }
