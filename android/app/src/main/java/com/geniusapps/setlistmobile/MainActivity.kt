@@ -78,13 +78,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
         // The web app hides this overlay menu while a sheet-music chart is open: it
-        // sits exactly where the chart viewer's close button is. The only thing
-        // this exposes to the page is showing/hiding that one button, and the
-        // WebView only ever loads the paired companion's own pages.
+        // sits exactly where the chart viewer's close button is, and its Settings screen
+        // has the same full screen toggle this menu does. What this exposes to the page is
+        // showing/hiding that one button and the full screen setting; the WebView only
+        // ever loads the paired companion's own pages.
         webView.addJavascriptInterface(object {
             @JavascriptInterface
             fun setMenuVisible(visible: Boolean) {
                 runOnUiThread { menuButton.visibility = if (visible) View.VISIBLE else View.GONE }
+            }
+
+            @JavascriptInterface
+            fun getFullscreen(): Boolean = fullscreenEnabled
+
+            @JavascriptInterface
+            fun setFullscreen(enabled: Boolean) {
+                runOnUiThread { if (enabled != fullscreenEnabled) toggleFullscreen() }
             }
         }, "GeniusAndroid")
 

@@ -1356,6 +1356,23 @@ function MobileStageView({
     onSheetViewerChange?.(showViewer);
     return () => onSheetViewerChange?.(false);
   }, [showViewer]);
+  // "Full screen" in Settings: the Android app hides its status/navigation bars (a swipe from the
+  // edge brings them back briefly); in a plain browser it's the Fullscreen API where there is one.
+  const hasNativeFullscreen = typeof window.GeniusAndroid?.setFullscreen === "function";
+  const canFullscreen = hasNativeFullscreen || !!document.fullscreenEnabled;
+  const [fullscreen, setFullscreenOn] = useState(false);
+  useEffect(() => {
+    if (!showSettings) return undefined;
+    const read = () => setFullscreenOn(hasNativeFullscreen ? !!window.GeniusAndroid.getFullscreen() : !!document.fullscreenElement);
+    read();
+    document.addEventListener("fullscreenchange", read);
+    return () => document.removeEventListener("fullscreenchange", read);
+  }, [showSettings]);
+  function toggleFullscreen(on) {
+    if (hasNativeFullscreen) { window.GeniusAndroid.setFullscreen(on); setFullscreenOn(on); }
+    else if (on) document.documentElement.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.().catch(() => {});
+  }
   useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
   useBackClose(showViewer, () => closeViewer());
 
@@ -1721,6 +1738,14 @@ function MobileStageView({
               <button className="fm-close" onClick={() => { setShowSettings(false); setListeningFor(null); }}>✕</button>
             </div>
             <div className="modal-body">
+              {canFullscreen && (<>
+              <div className="settings-section-title">DISPLAY</div>
+              <label className="settings-check">
+                <input type="checkbox" checked={fullscreen} onChange={e => toggleFullscreen(e.target.checked)} />
+                <span>Full screen</span>
+              </label>
+              <p className="sd-hint">Hides the status and navigation bars. Swipe in from the screen edge to bring them back for a moment.</p>
+              </>)}
               <div className="settings-section-title">SHEET MUSIC</div>
               <label className="settings-check">
                 <input type="checkbox" checked={sheetPrefs.enabled} onChange={e => updateSheetPrefs({ enabled: e.target.checked })} />
