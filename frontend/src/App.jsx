@@ -2148,6 +2148,12 @@ export default function App() {
       if (m.peaks      !== undefined) setTrackPeaks(m.peaks);
       if (m.bridge_latest !== undefined) setBridgeOutdated((m.bridge_version || 0) < m.bridge_latest);
       if (m.bpm !== undefined) setBeat(prev => (prev.qn === m.qn && prev.bpm === m.bpm) ? prev : { qn: m.qn, bpm: m.bpm });
+      // REAPER is playing a song this page didn't start (the app was just opened or reloaded mid-show): find it
+      // in the setlist by the active region, so the Now Playing / Up Next boxes and the list follow it.
+      if (m.type === "transport" && m.is_playing && m.region_id && currentIndexRef.current < 0) {
+        const idx = playbackItemsRef.current.findIndex(p => p.region_id === m.region_id || (!p.isFolder && getLiveItemRef.current?.(p)?.region_id === m.region_id));
+        if (idx >= 0) { setCurrentIndex(idx); setCurrentChildIndex(-1); setFocusedIndex(idx); setFocusedNestedItemId(null); setFocusedSCItemId(null); }
+      }
       // Sync playback selection from another client (e.g. mobile)
       if (m.type === "playback_state" && m.item_id) {
         const idx = playbackItemsRef.current.findIndex(i => i.id === m.item_id);
@@ -2809,6 +2815,8 @@ export default function App() {
   const setlistItemsRef           = useRef([]);
   const isPlayingRef              = useRef(false);
   const currentIndexRef           = useRef(-1);
+  const getLiveItemRef            = useRef(null);   // the websocket handler (set up earlier) needs the current region lookup
+  useEffect(() => { getLiveItemRef.current = getLiveItem; });
   const filteredRef               = useRef([]);
   const highlightedIdxRef         = useRef(0);
   const regionsRef                = useRef([]);
