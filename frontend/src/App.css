@@ -1969,3 +1969,5 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .active-setlist-name { max-width: 22vw; }
 /* wide screens in the Android app: keep the header's right end clear of the app's floating menu button */
 .android:not(.narrow) .app-header { padding-right: 68px; }
+/* Stage view on a wide screen (tablet): same as the phone — no now-playing text in the transport (the Selected display says NOW PLAYING). The empty cell stays so the controls stay centered. */
+.mode-stage:not(.narrow) .t-left > * { display: none; }
