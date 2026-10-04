@@ -1073,6 +1073,16 @@ function useBackClose(open, close) {
 
 const SHEET_ZOOMS = [1, 1.5, 2, 3];
 
+// Transport icons — drawn, not text glyphs (whose baselines and sizes differ), so they all sit on
+// the same vertical center. Each shape is optically centered in its 24x24 box.
+const TIcon = ({ children }) => <svg className="t-ico" viewBox="0 0 24 24" aria-hidden="true">{children}</svg>;
+const IconPlay   = () => <TIcon><path d="M8.5 5v14l11-7z" fill="currentColor" /></TIcon>;
+const IconPause  = () => <TIcon><path d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z" fill="currentColor" /></TIcon>;
+const IconStop   = () => <TIcon><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" /></TIcon>;
+const IconPrev   = () => <TIcon><path d="M5 5h2v14H5zM19 5v14L8 12z" fill="currentColor" /></TIcon>;
+const IconNext   = () => <TIcon><path d="M17 5h2v14h-2zM5 5v14l11-7z" fill="currentColor" /></TIcon>;
+const IconSearch = () => <TIcon><circle cx="10.5" cy="10.5" r="5.8" fill="none" stroke="currentColor" strokeWidth="2.2" /><path d="M15 15l5 5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></TIcon>;
+
 // Every chart page, fetched ahead of time and kept in memory as a blob, so a chart
 // opens instantly instead of waiting for the companion to render it. (The Android
 // app runs its WebView with the HTTP cache off, so a plain <img> prefetch wouldn't
@@ -1174,6 +1184,12 @@ function prioritizeSheets(list, typeOptions, preferred) {
   return [...list].sort((a, b) => rank(a) - rank(b));   // stable: ties keep the companion's order
 }
 
+// Region names are "Title - Artist": split at the LAST separator (a hyphen inside the title stays in it).
+function splitSongName(name) {
+  const m = /^(.*\S)\s+[-–—]\s+(\S.*)$/.exec(name || "");
+  return m ? [m[1], m[2]] : [name || "", ""];
+}
+
 // Fills the stage area (not the whole screen) so the transport bar underneath
 // stays on screen and usable while a chart is up.
 function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, autoScroll, invert, onToggleInvert }) {
@@ -1197,6 +1213,7 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
   const waitLeft = autoScroll && autoScroll.elapsed < autoScroll.wait
     ? Math.ceil(autoScroll.wait - autoScroll.elapsed) : 0;
   const sheet = sheets.find(s => s.file === activeFile) || sheets[0];
+  const [songTitle, songArtist] = splitSongName(song);
   // A different song (or sheet) always opens at the top, at the left edge, with auto-scroll's
   // hands-off timer cleared — whatever the previous chart was scrolled to.
   const openedRef = useRef(false);
@@ -1245,8 +1262,10 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
         // Sheet music mode stays on for a song with no chart: a blank page that says so, so the
         // screen doesn't jump back to the song list and forth again on the next song.
         <div className="sheet-viewer-body" key="none">
-          <div className="sheet-viewer-blank" role="img" aria-label="No sheet music available">
-            <span>No Sheet Music Available</span>
+          <div className="sheet-viewer-blank" role="img" aria-label={`${song}: no sheet music available`}>
+            <div className="sheet-viewer-blank-title">{songTitle}</div>
+            {songArtist && <div className="sheet-viewer-blank-artist">{songArtist}</div>}
+            <div className="sheet-viewer-blank-msg">No Sheet Music Available</div>
           </div>
         </div>
       )}
@@ -1297,7 +1316,7 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, bridgeOutdated, companionVersion, onSheetViewerChange,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, bridgeOutdated, beat, companionVersion, onSheetViewerChange,
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
@@ -1719,7 +1738,16 @@ function MobileStageView({
           <div className="mstage-sel-lbl">NOW PLAYING{selContainer ? ` · ${selContainer}` : ""}</div>
           <div className="mstage-sel-namerow">
             {/* green and flashing while this song is playing; a quiet grey dot otherwise, so the name never shifts */}
-            <span className={`mstage-live-dot${selPlaying ? " on" : ""}`} aria-label={selPlaying ? "Playing" : "Not playing"} />
+            {(() => {
+              // On each quarter note the dot remounts (new key) and plays one flash that fades over the beat;
+              // with no tempo from the bridge (an older one) it just flashes steadily.
+              const haveBeat = selPlaying && beat.bpm > 0 && beat.qn != null;
+              const beatSecs = haveBeat ? Math.min(0.6, (60 / beat.bpm) * 0.9) : 0.5;
+              return <span key={haveBeat ? `b${Math.floor(beat.qn)}` : (selPlaying ? "loop" : "off")}
+                className={`mstage-live-dot${selPlaying ? (haveBeat ? " on" : " on loop") : ""}`}
+                style={{ "--beat": `${beatSecs}s` }}
+                aria-label={selPlaying ? "Playing" : "Not playing"} />;
+            })()}
             <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
           </div>
           {/* Always one row of chips, so the bar (and the song name) never changes size
@@ -2065,6 +2093,8 @@ export default function App() {
   // The genius_bridge.lua running in REAPER is older than the one this companion ships (it
   // only picks up a new copy when restarted) — some features, like beat-aligned song changes, need the new one.
   const [bridgeOutdated, setBridgeOutdated] = useState(false);
+  // REAPER's position in quarter notes and its tempo — the Now Playing light pulses on each quarter note.
+  const [beat, setBeat] = useState({ qn: null, bpm: 0 });
   const [sheetsEnabled, setSheetsEnabled] = useState(() => loadSheetPrefs().enabled);
   useEffect(() => {
     const sync = () => setSheetsEnabled(loadSheetPrefs().enabled);
@@ -2114,6 +2144,7 @@ export default function App() {
       }
       if (m.peaks      !== undefined) setTrackPeaks(m.peaks);
       if (m.bridge_latest !== undefined) setBridgeOutdated((m.bridge_version || 0) < m.bridge_latest);
+      if (m.bpm !== undefined) setBeat(prev => (prev.qn === m.qn && prev.bpm === m.bpm) ? prev : { qn: m.qn, bpm: m.bpm });
       // Sync playback selection from another client (e.g. mobile)
       if (m.type === "playback_state" && m.item_id) {
         const idx = playbackItemsRef.current.findIndex(i => i.id === m.item_id);
@@ -4019,6 +4050,7 @@ export default function App() {
           reaperConnected={reaperConnected} wsConnected={wsConnected} sheets={sheets}
           sheetPreload={sheetPreload}
           bridgeOutdated={bridgeOutdated}
+          beat={beat}
           onSheetViewerChange={setSheetFull}
           companionVersion={companionVersion}
         />
@@ -4064,32 +4096,33 @@ export default function App() {
           )}
         </div>
 
-        {/* Search sits at the left, the transport in the middle; an empty slot of the same
-            width on the right keeps the transport centered (and the same size) whether or
-            not the search button is there. */}
+        {/* Three cells of a grid with equal outer columns: [Search, Prev] [PLAY] [Stop, Next]. Play is the
+            middle cell, so it sits at the exact center of the bar; Search is at the far left. Where
+            there is no Search button (not an admin) an empty slot of the same size keeps it that way. */}
         <div className="t-controls">
-        <div className="t-side">
-          {isAdmin && canControl && activeSetlist && (
-            <button className="t-btn t-search" onClick={() => setShowSongSearch(true)} title="Find a song">⌕</button>
-          )}
-        </div>
-        <div className="t-center">
-          <button className="t-btn" onClick={() => stepSong(-1)} disabled={!canControl || navIndex <= 0} title="Prev">⏮</button>
-          {(() => {
-            const selIsPlaying = isPlaying && !focusedSCItemId && focusedIndex === currentIndex;
-            return (
-              <button className={`t-btn t-play${selIsPlaying ? " on" : ""}`}
-                onClick={handleTransportPlayPause}
-                disabled={!canControl || !activeSetlist || playbackItems.length === 0}
-                title={canControl ? undefined : "This device is view-only"}>
-                {selIsPlaying ? <span className="icon-pause"><span /><span /></span> : "▶ PLAY"}
-              </button>
-            );
-          })()}
-          <button className="t-btn t-stop" onClick={stopPlayback} disabled={!canControl || !isPlaying} title="Stop">■</button>
-          <button className="t-btn" onClick={() => stepSong(1)} disabled={!canControl || navIndex >= playbackItems.length-1} title="Next">⏭</button>
-        </div>
-        <div className="t-side" aria-hidden="true" />
+          <div className="t-center t-grp-l">
+            {isAdmin && canControl && activeSetlist
+              ? <button className="t-btn t-search" onClick={() => setShowSongSearch(true)} title="Find a song"><IconSearch /></button>
+              : <span className="t-ph" aria-hidden="true" />}
+            <button className="t-btn" onClick={() => stepSong(-1)} disabled={!canControl || navIndex <= 0} title="Prev"><IconPrev /></button>
+          </div>
+          <div className="t-center t-mid">
+            {(() => {
+              const selIsPlaying = isPlaying && !focusedSCItemId && focusedIndex === currentIndex;
+              return (
+                <button className={`t-btn t-play${selIsPlaying ? " on" : ""}`}
+                  onClick={handleTransportPlayPause}
+                  disabled={!canControl || !activeSetlist || playbackItems.length === 0}
+                  title={canControl ? (selIsPlaying ? "Pause" : "Play") : "This device is view-only"}>
+                  {selIsPlaying ? <IconPause /> : <IconPlay />}
+                </button>
+              );
+            })()}
+          </div>
+          <div className="t-center t-grp-r">
+            <button className="t-btn t-stop" onClick={stopPlayback} disabled={!canControl || !isPlaying} title="Stop"><IconStop /></button>
+            <button className="t-btn" onClick={() => stepSong(1)} disabled={!canControl || navIndex >= playbackItems.length-1} title="Next"><IconNext /></button>
+          </div>
         </div>
 
         <div className="t-right">

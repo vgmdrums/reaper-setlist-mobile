@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v7 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics)
+-- Genius SetList Bridge Script v8 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -165,6 +165,12 @@ end
 local function collect_state()
   local play = reaper.GetPlayState()
   local pos  = reaper.GetPlayPosition()
+  -- Where we are in quarter notes, and the tempo there — the app pulses its "now playing" light on each quarter note.
+  local beat_qn, beat_bpm = 0, 0
+  pcall(function()
+    beat_qn  = reaper.TimeMap2_timeToQN(0, pos) or 0
+    beat_bpm = reaper.TimeMap_GetDividedBpmAtTime(pos) or 0
+  end)
   local proj, proj_path = reaper.EnumProjects(-1, "")
   proj_path = proj_path or ""
   local proj_name = reaper.GetProjectName(proj, "") or ""
@@ -172,11 +178,11 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":7,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f}',
+    '{"bridge_version":8,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),
-    collect_regions(), collect_tracks(), collect_peaks(), collect_midi_devices(), diag_json(), tick_gap_max * 1000)
+    collect_regions(), collect_tracks(), collect_peaks(), collect_midi_devices(), diag_json(), tick_gap_max * 1000, beat_qn, beat_bpm)
 end
 
 -- ── Song changes on the beat ────────────────────────────────────────────────
