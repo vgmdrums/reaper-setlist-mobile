@@ -1962,3 +1962,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 /* The REAPER bridge script is older than this companion's copy */
 .mstage-reaper-status { flex-wrap: wrap; }
 .mstage-bridge-note { display: block; width: 100%; text-align: center; margin-top: 2px; font-size: 11px; letter-spacing: .04em; text-transform: none; font-weight: 600; opacity: .85; }
+
+/* Stage view on a phone: no "now playing" text in the transport — it changed size and moved the
+   controls. The Selected display above says NOW PLAYING instead; the bar keeps its fixed size. */
+.narrow.mode-stage .t-left { display: none; }

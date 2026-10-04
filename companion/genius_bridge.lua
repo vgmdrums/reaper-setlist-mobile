@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v5 (song changes land on the next quarter note)
+-- Genius SetList Bridge Script v6 (song changes land on the next quarter note, without a MIDI flam)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -162,7 +162,7 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":5,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
+    '{"bridge_version":6,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),
@@ -182,26 +182,32 @@ end
 -- quarter note is the only boundary that applies.
 local pending_jump = nil   -- { pos = <project seconds to jump to>, at = <time_precise() to issue the seek> }
 
+-- Flam guard. REAPER generates MIDI for a block of audio slightly AHEAD of what you hear (its
+-- "processing" position, GetPlayPosition2, leads the audible one by the output latency), so by the
+-- time the audible beat arrives, the old region's MIDI note ON that beat has long been sent — and
+-- the new region's first note then fires too: a flam. To keep the old note from ever going out, the
+-- transport is stopped FLAM_GUARD seconds before the processing position reaches the beat (that must
+-- be more than one audio block), then playback of the new song is started exactly on the beat.
+-- The old song's last few milliseconds before the beat are dropped; the new song's downbeat is on time.
+local FLAM_GUARD = 0.025
+
 -- Returns true if the jump is now scheduled, false if the caller should just do it now.
 local function schedule_quantized_jump(pos)
   local ok, scheduled = pcall(function()
     if (reaper.GetPlayState() & 1) ~= 1 then return false end
-    local now  = reaper.GetPlayPosition()                 -- what you're hearing right now
     local rate = reaper.Master_GetPlayRate(0)
     if not rate or rate <= 0 then rate = 1 end
-    -- The seek is heard one output-latency after it's issued, so issue it that much early.
-    local latency = reaper.GetOutputLatency() or 0
-    if latency < 0 or latency > 0.5 then latency = 0 end
-    local next_qn = math.floor(reaper.TimeMap2_timeToQN(0, now)) + 1
-    local wait = 0
+    local pp = reaper.GetPlayPosition2()                  -- where REAPER is generating audio/MIDI right now
+    local next_qn = math.floor(reaper.TimeMap2_timeToQN(0, pp)) + 1
+    local wait_play = 0
     for _ = 1, 3 do
       local t_beat = reaper.TimeMap2_QNToTime(0, next_qn)
-      wait = (t_beat - now) / rate - latency
-      if wait >= 0.01 then break end   -- too close to catch this beat — take the next one
+      wait_play = (t_beat - pp) / rate                    -- wall seconds until processing reaches the beat
+      if wait_play - FLAM_GUARD >= 0.005 then break end   -- too close to stop in time — take the next beat
       next_qn = next_qn + 1
     end
-    if wait < 0 then wait = 0 end
-    pending_jump = { pos = pos, at = reaper.time_precise() + wait }
+    local t0 = reaper.time_precise()
+    pending_jump = { pos = pos, stop_at = t0 + wait_play - FLAM_GUARD, play_at = t0 + wait_play }
     return true
   end)
   return ok and scheduled or false
@@ -209,17 +215,18 @@ end
 
 -- Called every tick. REAPER's defer loop only runs ~30x a second, which would put the
 -- jump up to ~30 ms off the beat — so once it's due within the next tick or so, wait out
--- the last few milliseconds right here.
+-- the last few milliseconds right here (stop, then start on the beat: at most ~75 ms in all).
 local function service_pending_jump()
   if not pending_jump then return end
   if (reaper.GetPlayState() & 1) ~= 1 then pending_jump = nil; return end   -- stopped in the meantime
-  if pending_jump.at - reaper.time_precise() > 0.05 then return end
-  while reaper.time_precise() < pending_jump.at do end
-  local pos = pending_jump.pos
+  if pending_jump.stop_at - reaper.time_precise() > 0.05 then return end
+  local j = pending_jump
   pending_jump = nil
-  reaper.Main_OnCommand(1016, 0)           -- stop
-  reaper.SetEditCurPos(pos, true, false)   -- cursor to the new song (stopped, so no smooth seek)
-  reaper.Main_OnCommand(1007, 0)           -- play from there
+  while reaper.time_precise() < j.stop_at do end
+  reaper.Main_OnCommand(1016, 0)           -- stop (before the old note's MIDI goes out; also ends smooth seek's say)
+  reaper.SetEditCurPos(j.pos, true, false) -- cursor to the new song (stopped, so no smooth seek)
+  while reaper.time_precise() < j.play_at do end
+  reaper.Main_OnCommand(1007, 0)           -- play: the new song's first note lands on the beat
 end
 -- ────────────────────────────────────────────────────────────────────────────
 

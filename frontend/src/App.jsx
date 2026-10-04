@@ -1677,7 +1677,7 @@ function MobileStageView({
 
       {selName && (
         <div className="mstage-sel">
-          <div className="mstage-sel-lbl">SELECTED{selContainer ? ` · ${selContainer}` : ""}</div>
+          <div className="mstage-sel-lbl">{selPlaying ? "NOW PLAYING" : "SELECTED"}{selContainer ? ` · ${selContainer}` : ""}</div>
           <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
           {/* Always one row of chips, so the bar (and the song name) never changes size
               between songs: a placeholder chip stands in when there's no sheet music. */}
@@ -2576,12 +2576,13 @@ export default function App() {
     } catch(e) { console.error(e); }
   }
 
-  // follow: the selection moves to the new song too (the Next arrow / hotkey, as Prev
-  // always did). Auto-advance leaves the selection where the user put it.
-  function playNext(follow = false) {
+  // The selection always follows the song being played (the Stage view's one display shows
+  // it as NOW PLAYING). `manual`: the Next arrow / hotkey rather than the setlist moving on
+  // by itself — only a manual change waits for the next quarter note.
+  function playNext(manual = false) {
     const items = playbackItemsRef.current;
     const n = currentIndexRef.current + 1;
-    if (n < items.length) playItem(items[n], n, -1, follow === true, follow === true);
+    if (n < items.length) playItem(items[n], n, -1, true, manual === true);
     else { stopPlayback(); setCurrentIndex(-1); }
   }
 
@@ -2694,7 +2695,7 @@ export default function App() {
     if (item.isFolder && currentChildIndex === -1 && (item.children || []).length > 0) {
       if (!item.keycommand) {
         // Non-keycommand folder: auto-play selected child
-        playItem(item, currentIndex, item.selectedChildIdx ?? 0, false, false);
+        playItem(item, currentIndex, item.selectedChildIdx ?? 0, true, false);
       }
       // keycommand folders wait for key press, do nothing here
     } else if (currentChildIndex >= 0) {
