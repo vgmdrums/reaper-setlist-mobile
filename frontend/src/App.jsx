@@ -1744,7 +1744,7 @@ function MobileStageView({
                 <input type="checkbox" checked={fullscreen} onChange={e => toggleFullscreen(e.target.checked)} />
                 <span>Full screen</span>
               </label>
-              <p className="sd-hint">Hides the status and navigation bars. Swipe in from the screen edge to bring them back for a moment.</p>
+              <p className="sd-hint">Hides the status bar and the navigation / task bar. Swipe in from the screen edge to bring them back for a moment — the Back gesture (from the left or right edge) works straight away.</p>
               </>)}
               <div className="settings-section-title">SHEET MUSIC</div>
               <label className="settings-check">
@@ -3479,6 +3479,16 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
+  // Launch Show: first row of the header next to the logo on a phone; with the other controls on
+  // a wide screen (the left column there is only as wide as the logo and the setlist name).
+  const launchButton = isAdmin && (
+    <button className="hdr-btn hdr-launch" onClick={launchShow}
+      disabled={!canControl || !activeSetlist || playbackItems.length === 0}
+      title={canControl ? "Launch Show — go to Stage view and play from the top" : "This device is view-only"}>
+      LAUNCH SHOW
+    </button>
+  );
+
   return (
     <div className={`app mode-${mode}${narrow ? " narrow" : ""}${window.GeniusAndroid ? " android" : ""}${sheetFull ? " sheet-full" : ""}`}>
 
@@ -3494,13 +3504,7 @@ export default function App() {
           {isAdmin && activeSetlist && (
             <div className="active-setlist-name">{activeSetlist.name}</div>
           )}
-          {isAdmin && (
-            <button className="hdr-btn hdr-launch" onClick={launchShow}
-              disabled={!canControl || !activeSetlist || playbackItems.length === 0}
-              title={canControl ? "Launch Show — go to Stage view and play from the top" : "This device is view-only"}>
-              LAUNCH SHOW
-            </button>
-          )}
+          {narrow && launchButton}
         </div>
 
         {/* Everything past the logo is admin-only chrome — a non-admin
@@ -3509,6 +3513,7 @@ export default function App() {
             in Stage view now, not a header badge. */}
         {isAdmin && (
         <div className="header-right">
+          {!narrow && launchButton}
           <button className="hdr-btn" onClick={() => openReaper(activeSetlist?.rppPath)} title="Launch Reaper">
             <span className="reaper-ico">▣</span>
           </button>
