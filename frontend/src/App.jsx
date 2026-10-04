@@ -1297,6 +1297,209 @@ function formatKeyLabel(k) {
   return k ? k : "Not set";
 }
 
+// The per-device settings (sheet music, text size, full screen, hotkeys) and the Settings screen's open/closed state.
+// Owned by the App so the Settings screen and the status area at the bottom are the same in Stage and Edit mode.
+function useDeviceSettings(sheets) {
+  const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
+  const [listZoom, setListZoomState] = useState(loadListZoom);
+  const [showSettings, setShowSettings] = useState(false);
+  const [hotkeys, setHotkeys] = useState(loadHotkeys);
+  const [listeningFor, setListeningFor] = useState(null);
+  const [fullscreen, setFullscreenOn] = useState(false);
+
+  function setListZoom(n) {
+    setListZoomState(n);
+    try { localStorage.setItem(LIST_ZOOM_KEY, String(n)); } catch (e) { /* storage blocked — still works this session */ }
+  }
+  function updateSheetPrefs(patch) {
+    const next = { ...sheetPrefs, ...patch };
+    setSheetPrefs(next);
+    try { localStorage.setItem(SHEET_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
+  }
+  // The Settings checkboxes: the usual types plus any other type that's actually there.
+  const typeOptions = React.useMemo(() => {
+    const extra = [];
+    for (const sh of sheets) {
+      const t = (sh.type || "").toLowerCase();
+      if (t && !SHEET_TYPE_DEFAULTS.includes(t) && !extra.includes(t)) extra.push(t);
+    }
+    return [...SHEET_TYPE_DEFAULTS, ...extra];
+  }, [sheets]);
+
+  // "Full screen" in Settings: the Android app hides its status/navigation bars (a swipe from the
+  // edge brings them back briefly); in a plain browser it's the Fullscreen API where there is one.
+  const hasNativeFullscreen = typeof window.GeniusAndroid?.setFullscreen === "function";
+  const canFullscreen = hasNativeFullscreen || !!document.fullscreenEnabled;
+  useEffect(() => {
+    if (!showSettings) return undefined;
+    const read = () => setFullscreenOn(hasNativeFullscreen ? !!window.GeniusAndroid.getFullscreen() : !!document.fullscreenElement);
+    read();
+    document.addEventListener("fullscreenchange", read);
+    return () => document.removeEventListener("fullscreenchange", read);
+  }, [showSettings]);
+  function toggleFullscreen(on) {
+    if (hasNativeFullscreen) { window.GeniusAndroid.setFullscreen(on); setFullscreenOn(on); }
+    else if (on) document.documentElement.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.().catch(() => {});
+  }
+
+  // Captures the next keypress to bind it to whichever action's "Set" button
+  // was clicked. Rebinding a key that's already used elsewhere removes the
+  // old binding so two actions can never fire off the same key.
+  useEffect(() => {
+    if (!listeningFor) return;
+    function onKeyDown(e) {
+      e.preventDefault();
+      if (e.key === "Escape") { setListeningFor(null); return; }
+      const k = normalizeKey(e);
+      setHotkeys(prev => {
+        const next = {};
+        for (const [action, boundKey] of Object.entries(prev)) {
+          if (boundKey !== k) next[action] = boundKey;
+        }
+        next[listeningFor] = k;
+        localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+      setListeningFor(null);
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [listeningFor]);
+  function clearHotkey(action) {
+    setHotkeys(prev => {
+      const next = { ...prev };
+      delete next[action];
+      localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  const closeSettings = () => { setShowSettings(false); setListeningFor(null); };
+  useBackClose(showSettings, closeSettings);
+
+  return { sheetPrefs, updateSheetPrefs, listZoom, setListZoom, hotkeys, listeningFor, setListeningFor, showSettings, setShowSettings,
+           closeSettings, typeOptions, canFullscreen, fullscreen, toggleFullscreen, clearHotkey };
+}
+
+function DeviceSettings({ ds, canControl }) {
+  const { showSettings, closeSettings, sheetPrefs, updateSheetPrefs, listZoom, setListZoom, hotkeys, listeningFor, setListeningFor,
+          typeOptions: sheetTypeOptions, canFullscreen, fullscreen, toggleFullscreen, clearHotkey } = ds;
+  if (!showSettings) return null;
+  return (
+        <div className="overlay settings-overlay">
+          <div className="new-sl-modal settings-screen">
+            <div className="modal-hdr">
+              <span>SETTINGS — THIS DEVICE</span>
+              <button className="fm-close" onClick={closeSettings}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="settings-section-title">DISPLAY</div>
+              <div className="settings-zoom">
+                <span>Setlist text size</span>
+                <input type="range" min={LIST_ZOOM_MIN} max={LIST_ZOOM_MAX} step="10" value={listZoom}
+                  onChange={e => setListZoom(Number(e.target.value))} aria-label="Setlist text size" />
+                <span className="settings-zoom-val">{listZoom}%</span>
+              </div>
+              <p className="sd-hint">
+                Makes the song names in the list and in the Now Playing area bigger. A name too long for
+                the screen stays on one line and is cut off.
+              </p>
+              {canFullscreen && (<>
+              <label className="settings-check">
+                <input type="checkbox" checked={fullscreen} onChange={e => toggleFullscreen(e.target.checked)} />
+                <span>Full screen</span>
+              </label>
+              <p className="sd-hint">Hides the status bar and the navigation / task bar. Swipe in from the screen edge to bring them back for a moment — the Back gesture (from the left or right edge) works straight away.</p>
+              </>)}
+              <div className="settings-section-title">SHEET MUSIC</div>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.enabled} onChange={e => updateSheetPrefs({ enabled: e.target.checked })} />
+                <span>Enable sheet music</span>
+              </label>
+              <p className="sd-hint">
+                Off hides all sheet music — the chips, the chart viewer and the options below —
+                and stops loading charts in the background.
+              </p>
+              {sheetPrefs.enabled && (<>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.invert} onChange={e => updateSheetPrefs({ invert: e.target.checked })} />
+                <span>Invert sheet music colors (dark mode)</span>
+              </label>
+              <p className="sd-hint">White-on-black charts, easier on the eyes on a dark stage. Also on the ☾ button above any chart.</p>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.auto} onChange={e => updateSheetPrefs({ auto: e.target.checked })} />
+                <span>Automatically show sheet music</span>
+              </label>
+              <p className="sd-hint">
+                When a song with sheet music starts playing, its chart opens by itself — on the
+                first preferred type below that the song has.
+              </p>
+              <div className="settings-subtitle">Preferred types</div>
+              <div className="settings-checks">
+                {sheetTypeOptions.map(t => (
+                  <label key={t} className="settings-check">
+                    <input type="checkbox" checked={sheetPrefs.types.includes(t)}
+                      onChange={e => updateSheetPrefs({ types: e.target.checked
+                        ? [...sheetPrefs.types, t] : sheetPrefs.types.filter(x => x !== t) })} />
+                    <span>{t}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="sd-hint">
+                Checked types are listed first on every song, in the order shown here. With none
+                checked, a song's first chart is the one shown automatically.
+              </p>
+              <label className="settings-check">
+                <input type="checkbox" checked={sheetPrefs.scroll} onChange={e => updateSheetPrefs({ scroll: e.target.checked })} />
+                <span>Auto-scroll sheet music</span>
+              </label>
+              <label className="settings-wait">
+                <span>Wait before scrolling</span>
+                <input type="number" className="modal-input" inputMode="numeric" min="0" max={SCROLL_WAIT_MAX}
+                  disabled={!sheetPrefs.scroll} value={sheetPrefs.scrollWait}
+                  onChange={e => updateSheetPrefs({ scrollWait: e.target.value === "" ? 0 : clampScrollWait(e.target.value) })} />
+                <span>seconds</span>
+              </label>
+              <p className="sd-hint">
+                While a song plays, its chart holds still for this long, then scrolls on its own and
+                reaches the bottom about 30 seconds before the song ends, so all of it is on screen
+                for the last stretch. Touching the chart pauses the scrolling for a few seconds.
+              </p>
+              </>)}
+              {canControl && (<>
+              <div className="settings-section-title">HOTKEYS</div>
+              <p className="sd-hint">
+                Bindings are saved on this device only. Pick A Cover keys only fire while a
+                Pick A Cover folder is playing and waiting for a choice.
+              </p>
+              <div className="hotkey-list">
+                {HOTKEY_ACTIONS.map(({ id, label }) => (
+                  <div className="hotkey-row" key={id}>
+                    <span className="hotkey-label">{label}</span>
+                    <div className="hotkey-controls">
+                      <button
+                        className={`hotkey-keybtn${listeningFor === id ? " listening" : ""}`}
+                        onClick={() => setListeningFor(id)}>
+                        {listeningFor === id ? "Press a key…" : formatKeyLabel(hotkeys[id])}
+                      </button>
+                      {hotkeys[id] && (
+                        <button className="hotkey-clear" onClick={() => clearHotkey(id)} title="Clear">✕</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              </>)}
+            </div>
+            <div className="modal-footer">
+              <button className="modal-confirm" onClick={closeSettings}>DONE</button>
+            </div>
+          </div>
+        </div>
+  );
+}
+
 function MobileStageView({
   activeSetlist, setlistItems, playbackItems,
   currentIndex, currentChildIndex, focusedIndex, focusedSCItemId, focusedNestedItemId,
@@ -1304,15 +1507,12 @@ function MobileStageView({
   stageCollapsed, toggleStageCollapsed, getLiveItem,
   setFocusedIndex, setFocusedSCItemId, setFocusedNestedItemId,
   playItem, clickTrackIdx, mainTrackIdx, trackPeaks, canControl,
-  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, bridgeOutdated, beat, companionVersion, onSheetViewerChange,
+  onPlayPause, onStop, onNext, onPrev, reaperConnected, wsConnected, sheets: allSheets, sheetPreload, bridgeOutdated, beat, companionVersion, onSheetViewerChange, settings,
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
-  const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
-  const [listZoom, setListZoomState] = useState(loadListZoom);
-  function setListZoom(n) {
-    setListZoomState(n);
-    try { localStorage.setItem(LIST_ZOOM_KEY, String(n)); } catch (e) { /* storage blocked — still works this session */ }
-  }
+  // Device settings (sheet music, text size, hotkeys) live in the App: the Settings screen and the bottom
+  // status area are shared with Edit mode.
+  const { sheetPrefs, updateSheetPrefs, listZoom, hotkeys, listeningFor } = settings;
   // "Enable sheet music" off: no sheets exist as far as everything below is concerned.
   const sheets = sheetPrefs.enabled ? allSheets : NO_SHEETS;
   // Every chart of a song: the PDFs named "{region} - {type}.pdf" for its region
@@ -1328,15 +1528,6 @@ function MobileStageView({
     return [...SHEET_TYPE_DEFAULTS, ...extra];
   }, [sheets]);
   const prioritizedSheetsFor = name => prioritizeSheets(sheetsFor(name), sheetTypeOptions, sheetPrefs.types);
-  function updateSheetPrefs(patch) {
-    const next = { ...sheetPrefs, ...patch };
-    setSheetPrefs(next);
-    try { localStorage.setItem(SHEET_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
-    window.dispatchEvent(new Event(SHEET_PREFS_EVENT));
-  }
-  const [showSettings, setShowSettings] = useState(false);
-  const [hotkeys, setHotkeys] = useState(loadHotkeys);
-  const [listeningFor, setListeningFor] = useState(null);
   const currentPlayingItemId = currentIndex >= 0 ? playbackItems[currentIndex]?.id : null;
   const currentPlayingParent = currentIndex >= 0 ? playbackItems[currentIndex] : null;
 
@@ -1381,34 +1572,11 @@ function MobileStageView({
   // pages for this song shows the blank page instead.)
   useEffect(() => { if (viewing && !sheetPrefs.enabled) setViewing(null); });
 
-  // On the Android app, its overlay menu (reload / re-pair / fullscreen) sits
-  // exactly where the viewer's close button is — hide it while a chart is up.
-  // No-op in a browser, where there's no such bridge.
-  useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!showViewer && !showSettings); }, [showViewer, showSettings]);
-  useEffect(() => () => window.GeniusAndroid?.setMenuVisible?.(true), []);
   // While a chart is open the App hides everything but the transport bar (see .sheet-full).
   useEffect(() => {
     onSheetViewerChange?.(showViewer);
     return () => onSheetViewerChange?.(false);
   }, [showViewer]);
-  // "Full screen" in Settings: the Android app hides its status/navigation bars (a swipe from the
-  // edge brings them back briefly); in a plain browser it's the Fullscreen API where there is one.
-  const hasNativeFullscreen = typeof window.GeniusAndroid?.setFullscreen === "function";
-  const canFullscreen = hasNativeFullscreen || !!document.fullscreenEnabled;
-  const [fullscreen, setFullscreenOn] = useState(false);
-  useEffect(() => {
-    if (!showSettings) return undefined;
-    const read = () => setFullscreenOn(hasNativeFullscreen ? !!window.GeniusAndroid.getFullscreen() : !!document.fullscreenElement);
-    read();
-    document.addEventListener("fullscreenchange", read);
-    return () => document.removeEventListener("fullscreenchange", read);
-  }, [showSettings]);
-  function toggleFullscreen(on) {
-    if (hasNativeFullscreen) { window.GeniusAndroid.setFullscreen(on); setFullscreenOn(on); }
-    else if (on) document.documentElement.requestFullscreen?.().catch(() => {});
-    else document.exitFullscreen?.().catch(() => {});
-  }
-  useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
   useBackClose(showViewer, () => closeViewer());
 
   // Keep the song you're on at the top of the list as the arrows (or auto-advance, or a tap) move
@@ -1475,39 +1643,6 @@ function MobileStageView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [hotkeys, listeningFor, canControl, showPacPanel, currentPlayingParent, currentIndex,
       onPlayPause, onStop, onNext, onPrev, playItem]);
-
-  // Captures the next keypress to bind it to whichever action's "Set" button
-  // was clicked. Rebinding a key that's already used elsewhere removes the
-  // old binding so two actions can never fire off the same key.
-  useEffect(() => {
-    if (!listeningFor) return;
-    function onKeyDown(e) {
-      e.preventDefault();
-      if (e.key === "Escape") { setListeningFor(null); return; }
-      const k = normalizeKey(e);
-      setHotkeys(prev => {
-        const next = {};
-        for (const [action, boundKey] of Object.entries(prev)) {
-          if (boundKey !== k) next[action] = boundKey;
-        }
-        next[listeningFor] = k;
-        localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(next));
-        return next;
-      });
-      setListeningFor(null);
-    }
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [listeningFor]);
-
-  function clearHotkey(action) {
-    setHotkeys(prev => {
-      const next = { ...prev };
-      delete next[action];
-      localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
-  }
 
   // "Selected" bar — same three focus sources the desktop clock panel reads
   // (a top-level/child leaf, a soundcheck item, or a PAC sub-choice).
@@ -1630,22 +1765,8 @@ function MobileStageView({
   const mainLevel = mainTrackIdx >= 0 ? trackPeaks[mainTrackIdx] : undefined;
   const setPct = stageTotalTime > 0 ? Math.min(100, (stageElapsed / stageTotalTime) * 100) : 0;
 
-  const reaperState = !wsConnected ? "offline" : !reaperConnected ? "warning" : "live";
-  const reaperLabel = !wsConnected ? "OFFLINE" : !reaperConnected ? "REAPER NOT CONNECTED" : "REAPER CONNECTED";
-
   return (
     <div className="mstage" style={{ "--list-zoom": listZoom / 100 }}>
-      {/* Own full-width row, not a small header badge — this is the one
-          thing everything else on this screen depends on, so it needs to
-          be impossible to miss on a phone. */}
-      <div className={`mstage-reaper-status mstage-reaper-${reaperState}`}>
-        <span className="mstage-reaper-dot" />
-        {reaperLabel}
-        {reaperState === "live" && bridgeOutdated && (
-          <span className="mstage-bridge-note">Restart genius_bridge.lua in REAPER to update it</span>
-        )}
-      </div>
-
       <div className="mstage-setprog"><div className="mstage-setprog-fill" style={{ width: `${setPct}%` }} /></div>
 
       {(clickLevel !== undefined || mainLevel !== undefined) && (
@@ -1757,7 +1878,9 @@ function MobileStageView({
               ? prioritizedSheetsFor(selName).map(sh => (
                 <button key={sh.file}
                   className={`mstage-sheet-btn${showViewer && viewing.song === selName && viewing.file === sh.file ? " on" : ""}`}
-                  onClick={() => setViewing({ song: selName, file: sh.file })}>
+                  onClick={() => (showViewer && viewing.song === selName && viewing.file === sh.file)
+                    ? closeViewer()                                      // the lit chip: tap again to close the chart
+                    : setViewing({ song: selName, file: sh.file })}>
                   {sh.type || "Sheet"}
                 </button>
               ))
@@ -1774,130 +1897,6 @@ function MobileStageView({
         </div>
       )}
 
-      {/* Shown at the very bottom of the screen, below the transport bar (CSS order). So whoever's running the show can glance at a phone and know which
-          one it is — matches the name shown in the tray's device list. */}
-      <div className="mstage-identity">
-        <span className="mstage-identity-text">
-          Connected as {getDeviceLabel()}{!canControl && <span className="mstage-view-only"> · VIEW ONLY</span>}
-          {companionVersion && ` · companion v${companionVersion}`}
-          {sheetPrefs.enabled && sheetPreload.total > 0 && (sheetPreload.done < sheetPreload.total
-            ? ` · loading sheets ${sheetPreload.done}/${sheetPreload.total}` : " · sheets ready")}
-        </span>
-        <button className="mstage-settings-btn" onClick={() => setShowSettings(true)} title="Settings">⚙</button>
-      </div>
-
-      {showSettings && (
-        <div className="overlay settings-overlay">
-          <div className="new-sl-modal settings-screen">
-            <div className="modal-hdr">
-              <span>SETTINGS — THIS DEVICE</span>
-              <button className="fm-close" onClick={() => { setShowSettings(false); setListeningFor(null); }}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="settings-section-title">DISPLAY</div>
-              <div className="settings-zoom">
-                <span>Setlist text size</span>
-                <input type="range" min={LIST_ZOOM_MIN} max={LIST_ZOOM_MAX} step="10" value={listZoom}
-                  onChange={e => setListZoom(Number(e.target.value))} aria-label="Setlist text size" />
-                <span className="settings-zoom-val">{listZoom}%</span>
-              </div>
-              <p className="sd-hint">
-                Makes the song names in the list and in the Now Playing area bigger. A name too long for
-                the screen stays on one line and is cut off.
-              </p>
-              {canFullscreen && (<>
-              <label className="settings-check">
-                <input type="checkbox" checked={fullscreen} onChange={e => toggleFullscreen(e.target.checked)} />
-                <span>Full screen</span>
-              </label>
-              <p className="sd-hint">Hides the status bar and the navigation / task bar. Swipe in from the screen edge to bring them back for a moment — the Back gesture (from the left or right edge) works straight away.</p>
-              </>)}
-              <div className="settings-section-title">SHEET MUSIC</div>
-              <label className="settings-check">
-                <input type="checkbox" checked={sheetPrefs.enabled} onChange={e => updateSheetPrefs({ enabled: e.target.checked })} />
-                <span>Enable sheet music</span>
-              </label>
-              <p className="sd-hint">
-                Off hides all sheet music — the chips, the chart viewer and the options below —
-                and stops loading charts in the background.
-              </p>
-              {sheetPrefs.enabled && (<>
-              <label className="settings-check">
-                <input type="checkbox" checked={sheetPrefs.invert} onChange={e => updateSheetPrefs({ invert: e.target.checked })} />
-                <span>Invert sheet music colors (dark mode)</span>
-              </label>
-              <p className="sd-hint">White-on-black charts, easier on the eyes on a dark stage. Also on the ☾ button above any chart.</p>
-              <label className="settings-check">
-                <input type="checkbox" checked={sheetPrefs.auto} onChange={e => updateSheetPrefs({ auto: e.target.checked })} />
-                <span>Automatically show sheet music</span>
-              </label>
-              <p className="sd-hint">
-                When a song with sheet music starts playing, its chart opens by itself — on the
-                first preferred type below that the song has.
-              </p>
-              <div className="settings-subtitle">Preferred types</div>
-              <div className="settings-checks">
-                {sheetTypeOptions.map(t => (
-                  <label key={t} className="settings-check">
-                    <input type="checkbox" checked={sheetPrefs.types.includes(t)}
-                      onChange={e => updateSheetPrefs({ types: e.target.checked
-                        ? [...sheetPrefs.types, t] : sheetPrefs.types.filter(x => x !== t) })} />
-                    <span>{t}</span>
-                  </label>
-                ))}
-              </div>
-              <p className="sd-hint">
-                Checked types are listed first on every song, in the order shown here. With none
-                checked, a song's first chart is the one shown automatically.
-              </p>
-              <label className="settings-check">
-                <input type="checkbox" checked={sheetPrefs.scroll} onChange={e => updateSheetPrefs({ scroll: e.target.checked })} />
-                <span>Auto-scroll sheet music</span>
-              </label>
-              <label className="settings-wait">
-                <span>Wait before scrolling</span>
-                <input type="number" className="modal-input" inputMode="numeric" min="0" max={SCROLL_WAIT_MAX}
-                  disabled={!sheetPrefs.scroll} value={sheetPrefs.scrollWait}
-                  onChange={e => updateSheetPrefs({ scrollWait: e.target.value === "" ? 0 : clampScrollWait(e.target.value) })} />
-                <span>seconds</span>
-              </label>
-              <p className="sd-hint">
-                While a song plays, its chart holds still for this long, then scrolls on its own and
-                reaches the bottom about 30 seconds before the song ends, so all of it is on screen
-                for the last stretch. Touching the chart pauses the scrolling for a few seconds.
-              </p>
-              </>)}
-              {canControl && (<>
-              <div className="settings-section-title">HOTKEYS</div>
-              <p className="sd-hint">
-                Bindings are saved on this device only. Pick A Cover keys only fire while a
-                Pick A Cover folder is playing and waiting for a choice.
-              </p>
-              <div className="hotkey-list">
-                {HOTKEY_ACTIONS.map(({ id, label }) => (
-                  <div className="hotkey-row" key={id}>
-                    <span className="hotkey-label">{label}</span>
-                    <div className="hotkey-controls">
-                      <button
-                        className={`hotkey-keybtn${listeningFor === id ? " listening" : ""}`}
-                        onClick={() => setListeningFor(id)}>
-                        {listeningFor === id ? "Press a key…" : formatKeyLabel(hotkeys[id])}
-                      </button>
-                      {hotkeys[id] && (
-                        <button className="hotkey-clear" onClick={() => clearHotkey(id)} title="Clear">✕</button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              </>)}
-            </div>
-            <div className="modal-footer">
-              <button className="modal-confirm" onClick={() => { setShowSettings(false); setListeningFor(null); }}>DONE</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1991,6 +1990,8 @@ export default function App() {
   // it's created; clicking a section's header highlights it; selecting any song clears it).
   const [focusedContainerId, setFocusedContainerId] = useState(null);
   const focusedContainerIdRef = useRef(null);
+  const pendingFocusIdRef = useRef(null);          // a song just added from the region list: select it when it appears
+  const [selectFirstTick, setSelectFirstTick] = useState(0);   // bumped when a setlist is chosen: select its first song
   useEffect(() => { focusedContainerIdRef.current = focusedContainerId; }, [focusedContainerId]);
   const [recentSongs, setRecentSongs] = useState(loadRecentSongs);
   const [confirmDlg,    setConfirmDlg]   = useState(null);   // {title, message, confirmLabel, onConfirm}
@@ -2102,12 +2103,8 @@ export default function App() {
   const [bridgeOutdated, setBridgeOutdated] = useState(false);
   // REAPER's position in quarter notes and its tempo — the Now Playing light pulses on each quarter note.
   const [beat, setBeat] = useState({ qn: null, bpm: 0 });
-  const [sheetsEnabled, setSheetsEnabled] = useState(() => loadSheetPrefs().enabled);
-  useEffect(() => {
-    const sync = () => setSheetsEnabled(loadSheetPrefs().enabled);
-    window.addEventListener(SHEET_PREFS_EVENT, sync);
-    return () => window.removeEventListener(SHEET_PREFS_EVENT, sync);
-  }, []);
+  const ds = useDeviceSettings(sheets);          // per-device settings + the Settings screen (shared by Stage and Edit)
+  const sheetsEnabled = ds.sheetPrefs.enabled;
   const [sheetFull, setSheetFull] = useState(false);   // a chart is open: it gets the whole screen but the transport bar
   const fetchSheetsRef = useRef(null);
   // Shown in the Stage footer: which companion this device is really talking to.
@@ -2356,6 +2353,7 @@ export default function App() {
     const hl = focusedContainerIdRef.current;
     if (hl && setlistItemsRef.current.some(i => i.id === hl && i.isContainer)) { addToContainer(hl, region); return; }
     const newItem = { ...region, id: uid(), region_id: region.id, region_index: region.index };
+    pendingFocusIdRef.current = newItem.id;      // …and it becomes the selected song once it's in the list
     const focusedId = focusedIndexRef.current >= 0 ? playbackItemsRef.current[focusedIndexRef.current]?.id : null;
 
     const focusedItem = focusedId ? playbackItemsRef.current.find(i => i.id === focusedId) : null;
@@ -2485,7 +2483,11 @@ export default function App() {
   // ── Container functions ────────────────────────────────────────────────────
   function createContainer() {
     const newItem = { id: uid(), name: "New Section", isContainer: true, collapsed: false, children: [] };
+    const hl = focusedContainerIdRef.current;
     mutateSetlist(items => {
+      // a section is highlighted: the new one goes right after it
+      const hi = hl ? items.findIndex(i => i.id === hl && i.isContainer) : -1;
+      if (hi >= 0) { const next = [...items]; next.splice(hi + 1, 0, newItem); return next; }
       const focusedId = focusedIndexRef.current >= 0 ? playbackItemsRef.current[focusedIndexRef.current]?.id : null;
       if (!focusedId) return [...items, newItem];
       const topIdx = items.findIndex(item =>
@@ -2503,6 +2505,7 @@ export default function App() {
 
   function addToContainer(containerItemId, region) {
     const newItem = { ...region, id: uid(), region_id: region.id, region_index: region.index };
+    pendingFocusIdRef.current = newItem.id;
     mutateSetlist(items => items.map(item => {
       if (item.id !== containerItemId) return item;
       const children = item.children || [];
@@ -3312,6 +3315,7 @@ export default function App() {
     setActiveId(id);
     setCurrentIndex(-1);
     setFocusedIndex(-1);
+    setSelectFirstTick(t => t + 1);
     setShowFileMenu(false);
     // Update lastUsed timestamp for sort order
     const updated = allSetlists.map(s => s.id === id ? {...s, lastUsed: Date.now()} : s);
@@ -3505,10 +3509,29 @@ export default function App() {
   // Where Next/Prev start from: the playing song, or — when stopped — the selected one.
   const navIndex = isPlaying ? currentIndex : (focusedIndex >= 0 ? focusedIndex : currentIndex);
 
+  // A song just added from the region list becomes the selected song.
+  useEffect(() => {
+    const id = pendingFocusIdRef.current;
+    if (!id) return;
+    pendingFocusIdRef.current = null;
+    const idx = playbackItems.findIndex(p => p.id === id);
+    if (idx >= 0) { setFocusedIndex(idx); setFocusedNestedItemId(null); setFocusedSCItemId(null); }
+  }, [playbackItems]);
+  // A setlist was chosen: its first song is selected.
+  useEffect(() => {
+    if (selectFirstTick === 0) return;
+    const idx = playbackItems.findIndex(p => !p._isSoundcheck);
+    if (idx >= 0) { setFocusedIndex(idx); setFocusedNestedItemId(null); setFocusedSCItemId(null); }
+  }, [selectFirstTick]);
+
   // Selecting a song (anywhere) ends the section highlight.
   useEffect(() => {
     if (focusedIndex >= 0 || focusedNestedItemId || focusedSCItemId) setFocusedContainerId(null);
   }, [focusedIndex, focusedNestedItemId, focusedSCItemId]);
+
+  // On the Android app, its overlay menu (reload / re-pair / fullscreen) sits where a chart's close button and the
+  // Settings screen's close button are — hide it while either is up. No-op in a browser (no such bridge).
+  useEffect(() => { window.GeniusAndroid?.setMenuVisible?.(!sheetFull && !ds.showSettings); }, [sheetFull, ds.showSettings]);
 
   // Back gesture closes the topmost overlay (registered in the order they open);
   // an admin in Edit mode goes back to Stage before anything leaves the app.
@@ -3574,6 +3597,8 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // Launch Show: first row of the header next to the logo on a phone; with the other controls on
   // a wide screen (the left column there is only as wide as the logo and the setlist name).
+  const reaperState = !wsConnected ? "offline" : !reaperConnected ? "warning" : "live";
+  const reaperLabel = !wsConnected ? "OFFLINE" : !reaperConnected ? "REAPER NOT CONNECTED" : "REAPER CONNECTED";
   const launchButton = isAdmin && (
     <button className="hdr-btn hdr-launch" onClick={launchShow}
       disabled={!canControl || !activeSetlist || playbackItems.length === 0}
@@ -4075,6 +4100,7 @@ export default function App() {
           sheetPreload={sheetPreload}
           bridgeOutdated={bridgeOutdated}
           beat={beat}
+          settings={ds}
           onSheetViewerChange={setSheetFull}
           companionVersion={companionVersion}
         />
@@ -4155,6 +4181,27 @@ export default function App() {
           )}
         </div>
       </footer>
+
+      {/* ── Status area, below the transport — the same in Stage and Edit mode ── */}
+      <div className={`mstage-reaper-status mstage-reaper-${reaperState}`}>
+        <span className="mstage-reaper-dot" />
+        {reaperLabel}
+        {reaperState === "live" && bridgeOutdated && (
+          <span className="mstage-bridge-note">Restart genius_bridge.lua in REAPER to update it</span>
+        )}
+      </div>
+      {/* So whoever's running the show can glance at a phone and know which one it is — matches the name shown
+          in the tray's device list. */}
+      <div className="mstage-identity">
+        <span className="mstage-identity-text">
+          Connected as {getDeviceLabel()}{!canControl && <span className="mstage-view-only"> · VIEW ONLY</span>}
+          {companionVersion && ` · companion v${companionVersion}`}
+          {ds.sheetPrefs.enabled && sheetPreload.total > 0 && (sheetPreload.done < sheetPreload.total
+            ? ` · loading sheets ${sheetPreload.done}/${sheetPreload.total}` : " · sheets ready")}
+        </span>
+        <button className="mstage-settings-btn" onClick={() => ds.setShowSettings(true)} title="Settings">⚙</button>
+      </div>
+      <DeviceSettings ds={ds} canControl={canControl} />
 
       {/* ── Overlays ── */}
       {showFileMenu && (

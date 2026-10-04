@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v8 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position)
+-- Genius SetList Bridge Script v9 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position; updates itself)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -178,7 +178,7 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":8,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
+    '{"bridge_version":9,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),
@@ -331,7 +331,31 @@ local function process_command()
   write_file(CMD_FILE, "")
 end
 
+-- ── Self-update ─────────────────────────────────────────────────────────────
+-- The companion app copies a newer genius_bridge.lua over this file whenever it starts. REAPER keeps running
+-- the copy it loaded, so every ~2 seconds look at the file: if it changed (and still compiles), hand over to
+-- the new copy — no need to restart the script or REAPER. A broken copy is ignored; this one keeps running.
+local SCRIPT_PATH = reaper.GetResourcePath() .. "/Scripts/genius_bridge.lua"
+local loaded_src = read_file(SCRIPT_PATH)
+local last_src_check = 0
+
+local function check_for_update()
+  local now = reaper.time_precise()
+  if now - last_src_check < 2 then return false end
+  last_src_check = now
+  local src = read_file(SCRIPT_PATH)
+  if not src or src == "" or src == loaded_src then return false end
+  local fn = load(src, "=genius_bridge.lua")
+  if not fn then return false end                         -- doesn't compile: keep running this one
+  _should_quit = true                                     -- this loop ends…
+  reaper.SetExtState("GeniusSetList", "running", "0", false)   -- …so the new copy's "already running" check passes
+  reaper.defer(function() fn() end)                       -- …and the new copy starts on the next cycle
+  return true
+end
+-- ────────────────────────────────────────────────────────────────────────────
+
 local function tick()
+  if check_for_update() then return end
   -- longest gap between ticks in the last couple of seconds (a slow bridge loop = late jumps)
   local now = reaper.time_precise()
   if last_tick_t then
