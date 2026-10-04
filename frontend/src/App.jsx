@@ -1192,7 +1192,7 @@ function splitSongName(name) {
 
 // Fills the stage area (not the whole screen) so the transport bar underneath
 // stays on screen and usable while a chart is up.
-function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, autoScroll, invert, onToggleInvert }) {
+function SheetViewer({ song, sheets, activeFile, onPick, onClose, autoScroll, invert, onToggleInvert }) {
   const [zoomIdx, setZoomIdx] = useState(0);
   const bodyRef = useRef(null);
   const handsOffUntil = useRef(0);
@@ -1232,7 +1232,7 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
   return (
     <div className={`sheet-viewer${invert ? " inverted" : ""}`}>
       <div className="sheet-viewer-hdr">
-        <span className="sheet-viewer-title">{song}</span>
+        <span className="sheet-viewer-spacer" />   {/* the song is named in the Now Playing box below */}
         <button className={`sheet-viewer-btn${invert ? " on" : ""}`} onClick={onToggleInvert}
           aria-label="Dark mode" aria-pressed={!!invert} title="Invert colors (dark mode)">☾</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === 0}
@@ -1267,13 +1267,6 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
             {songArtist && <div className="sheet-viewer-blank-artist">{songArtist}</div>}
             <div className="sheet-viewer-blank-msg">No Sheet Music Available</div>
           </div>
-        </div>
-      )}
-      {nextSong && (
-        <div className="sheet-viewer-next">
-          <span className="sheet-viewer-next-lbl">NEXT</span>
-          <span className="sheet-viewer-next-name">{nextSong.name}</span>
-          {nextSong.hasSheet && <span className="mstage-flag sheet">SHEET</span>}
         </div>
       )}
     </div>
@@ -1457,17 +1450,6 @@ function MobileStageView({
     ? { elapsed: position - liveSong.start, duration: liveSong.end - liveSong.start, wait: sheetPrefs.scrollWait }
     : null;
 
-  // The viewer's "NEXT" line: the song after the one being viewed.
-  const nextForViewer = (() => {
-    if (!showViewer) return null;
-    const idx = playbackItems.findIndex(p => getLiveItem(p).name === viewing.song
-      || (p.isFolder && (p.children || []).some(c => getLiveItem(c).name === viewing.song)));
-    const nxt = idx >= 0 ? playbackItems[idx + 1] : null;
-    if (!nxt) return null;
-    const name = getLiveItem(nxt).name || nxt.name;
-    return { name, hasSheet: sheetsFor(name).length > 0 };
-  })();
-
   // Fires bound actions on keydown. Disabled while capturing a new binding
   // (the effect below owns the keyboard then) and for view-only devices —
   // same gate the transport buttons already respect.
@@ -1602,6 +1584,17 @@ function MobileStageView({
     if (isPlaying && !sheetPrefs.auto) followSong(playingName);   // "auto show" does its own switching
   }, [playingName]);
 
+  // The "Up Next" box: the song after the one in the Now Playing box.
+  const upNext = (() => {
+    if (!selName) return null;
+    const idx = playbackItems.findIndex(p => getLiveItem(p).name === selName
+      || (p.isFolder && (p.children || []).some(c => getLiveItem(c).name === selName)));
+    const nxt = idx >= 0 ? playbackItems[idx + 1] : null;
+    if (!nxt) return null;
+    const name = getLiveItem(nxt).name || nxt.name;
+    return { name, hasSheet: sheetsFor(name).length > 0 };
+  })();
+
   // Tap-once-to-select, tap-again-to-play — mobile.html's exact row behavior;
   // there's no double-tap gesture to lean on like the desktop mouse UI does.
   function tapLeaf(pbIdx, item, childIndex, isFocused, focus) {
@@ -1666,6 +1659,7 @@ function MobileStageView({
         </div>
       )}
 
+      <div className="mstage-body">
       <div className="mstage-list" ref={stageListRef}>
         {!activeSetlist ? (
           <div className="mstage-empty">No setlist loaded</div>
@@ -1713,6 +1707,14 @@ function MobileStageView({
           }
           return renderRow(item, pbIdx);
         })}
+      </div>
+
+      {showViewer && (
+        <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
+          onPick={file => setViewing(v => ({ ...v, file }))} onClose={closeViewer}
+          autoScroll={autoScroll} invert={sheetPrefs.invert}
+          onToggleInvert={() => updateSheetPrefs({ invert: !sheetPrefs.invert })} />
+      )}
       </div>
 
       {showPacPanel && (
@@ -1765,14 +1767,15 @@ function MobileStageView({
         </div>
       )}
 
-      {showViewer && (
-        <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
-          onPick={file => setViewing(v => ({ ...v, file }))} onClose={closeViewer} nextSong={nextForViewer}
-          autoScroll={autoScroll} invert={sheetPrefs.invert}
-          onToggleInvert={() => updateSheetPrefs({ invert: !sheetPrefs.invert })} />
+      {selName && (
+        <div className="mstage-up">
+          <span className="mstage-up-lbl">UP NEXT</span>
+          <span className="mstage-up-name">{upNext ? upNext.name : "End of setlist"}</span>
+          {upNext && sheetPrefs.enabled && upNext.hasSheet && <span className="mstage-flag sheet">SHEET</span>}
+        </div>
       )}
 
-      {/* So whoever's running the show can glance at a phone and know which
+      {/* Shown at the very bottom of the screen, below the transport bar (CSS order). So whoever's running the show can glance at a phone and know which
           one it is — matches the name shown in the tray's device list. */}
       <div className="mstage-identity">
         <span className="mstage-identity-text">

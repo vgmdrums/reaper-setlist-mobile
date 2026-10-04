@@ -2088,3 +2088,25 @@ button:not(:disabled):active {
 .sheet-viewer-blank-title { font-size: 34px; font-weight: 800; line-height: 1.1; color: #222; }
 .sheet-viewer-blank-artist { font-size: 22px; font-weight: 600; color: #666; }
 .sheet-viewer-blank-msg { margin-top: 28px; font-size: 20px; font-weight: 700; color: #999; letter-spacing: .04em; text-transform: uppercase; }
+
+/* ══ Stage layout: [banner] [list — or the chart in its place] [Now Playing] [Up Next] [transport] [connected as…] ══
+   .mstage dissolves into the page's column (display: contents), so its pieces can be ordered around the transport
+   bar, which is the next sibling: the "connected as" line goes below it, at the very bottom of the screen. */
+.mstage { display: contents; }
+.mstage-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.mstage-body .mstage-list { flex: 1; min-height: 0; }
+.mstage-identity { order: 20; }
+.sheet-viewer-spacer { flex: 1; }
+
+.mstage-up {
+  flex-shrink: 0; display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 14px;
+  background: var(--bg2); border-top: 1px solid var(--border);
+}
+.mstage-up-lbl { font-size: 11px; letter-spacing: 2.5px; font-weight: 700; color: var(--text2); flex-shrink: 0; }
+.mstage-up-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: calc(19px * var(--list-zoom)); font-weight: 700; color: var(--text);
+}
+.android:not(.narrow) .mstage-up { min-height: 64px; padding: 12px 20px; }
+.android:not(.narrow) .mstage-up-lbl { font-size: 15px; }
+.android:not(.narrow) .mstage-up-name { font-size: calc(26px * var(--list-zoom)); }
