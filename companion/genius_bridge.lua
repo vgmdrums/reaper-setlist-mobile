@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v6 (song changes land on the next quarter note, without a MIDI flam)
+-- Genius SetList Bridge Script v7 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -22,6 +22,8 @@ local STATE_FILE  = reaper.GetResourcePath() .. "/genius_state.json"
 local CMD_FILE    = reaper.GetResourcePath() .. "/genius_cmd.json"
 local last_cmd_id = ""
 local _should_quit = false
+local jump_diag, jump_verify = nil, nil                     -- timing diagnostics of the last beat-aligned jump
+local last_tick_t, tick_gap_max, tick_gap_window_start = nil, 0, 0
 
 local function write_file(path, data)
   local f = io.open(path, "w")
@@ -152,6 +154,14 @@ local function collect_midi_devices()
   return "[" .. table.concat(out, ",") .. "]"
 end
 
+local function diag_json()
+  if not jump_diag then return "null" end
+  local d = jump_diag
+  return string.format('{"planned_wait_ms":%.1f,"beat_ms":%.1f,"skipped_beats":%d,"stop_late_ms":%.1f,"play_late_ms":%.1f,"calls_ms":%.1f,"start_lag_ms":%s}',
+    d.planned_wait_ms, d.beat_ms, d.skipped_beats, d.stop_late_ms, d.play_late_ms, d.calls_ms,
+    d.start_lag_ms and string.format("%.1f", d.start_lag_ms) or "null")
+end
+
 local function collect_state()
   local play = reaper.GetPlayState()
   local pos  = reaper.GetPlayPosition()
@@ -162,11 +172,11 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":6,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s}',
+    '{"bridge_version":7,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f}',
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),
-    collect_regions(), collect_tracks(), collect_peaks(), collect_midi_devices())
+    collect_regions(), collect_tracks(), collect_peaks(), collect_midi_devices(), diag_json(), tick_gap_max * 1000)
 end
 
 -- ── Song changes on the beat ────────────────────────────────────────────────
@@ -180,7 +190,7 @@ end
 -- jump until ITS boundary (next measure, end of the region...) on top of our wait — so the
 -- change would land late. Stopping first takes smooth seek out of the picture, and the
 -- quarter note is the only boundary that applies.
-local pending_jump = nil   -- { pos = <project seconds to jump to>, at = <time_precise() to issue the seek> }
+local pending_jump = nil   -- { pos = <project seconds to jump to>, stop_at / play_at = <time_precise() to stop / to start the new song> }
 
 -- Flam guard. REAPER generates MIDI for a block of audio slightly AHEAD of what you hear (its
 -- "processing" position, GetPlayPosition2, leads the audible one by the output latency), so by the
@@ -198,16 +208,20 @@ local function schedule_quantized_jump(pos)
     local rate = reaper.Master_GetPlayRate(0)
     if not rate or rate <= 0 then rate = 1 end
     local pp = reaper.GetPlayPosition2()                  -- where REAPER is generating audio/MIDI right now
-    local next_qn = math.floor(reaper.TimeMap2_timeToQN(0, pp)) + 1
-    local wait_play = 0
+    local qn0 = reaper.TimeMap2_timeToQN(0, pp)
+    local next_qn = math.floor(qn0) + 1
+    local wait_play, skipped = 0, 0
     for _ = 1, 3 do
       local t_beat = reaper.TimeMap2_QNToTime(0, next_qn)
       wait_play = (t_beat - pp) / rate                    -- wall seconds until processing reaches the beat
       if wait_play - FLAM_GUARD >= 0.005 then break end   -- too close to stop in time — take the next beat
       next_qn = next_qn + 1
+      skipped = skipped + 1
     end
     local t0 = reaper.time_precise()
-    pending_jump = { pos = pos, stop_at = t0 + wait_play - FLAM_GUARD, play_at = t0 + wait_play }
+    local beat_len = (reaper.TimeMap2_QNToTime(0, next_qn + 1) - reaper.TimeMap2_QNToTime(0, next_qn)) / rate
+    pending_jump = { pos = pos, stop_at = t0 + wait_play - FLAM_GUARD, play_at = t0 + wait_play,
+                     planned_wait = wait_play, beat_len = beat_len, skipped = skipped }
     return true
   end)
   return ok and scheduled or false
@@ -223,10 +237,36 @@ local function service_pending_jump()
   local j = pending_jump
   pending_jump = nil
   while reaper.time_precise() < j.stop_at do end
+  local t_stop = reaper.time_precise()
   reaper.Main_OnCommand(1016, 0)           -- stop (before the old note's MIDI goes out; also ends smooth seek's say)
   reaper.SetEditCurPos(j.pos, true, false) -- cursor to the new song (stopped, so no smooth seek)
   while reaper.time_precise() < j.play_at do end
+  local t_play = reaper.time_precise()
   reaper.Main_OnCommand(1007, 0)           -- play: the new song's first note lands on the beat
+  local t_done = reaper.time_precise()
+  -- Timing diagnostics (shown in genius_state.json as "jump_diag"): how long we waited, how far off
+  -- the stop / play calls were from plan, how long the calls themselves took, and (filled in a
+  -- moment later, see service_jump_verify) how late REAPER's audio actually started.
+  jump_diag = { planned_wait_ms = j.planned_wait * 1000, beat_ms = j.beat_len * 1000, skipped_beats = j.skipped,
+                stop_late_ms = (t_stop - j.stop_at) * 1000, play_late_ms = (t_play - j.play_at) * 1000,
+                calls_ms = (t_done - t_stop) * 1000, start_lag_ms = nil }
+  jump_verify = { at = t_play + 0.25, t_play = t_play, pos = j.pos }
+end
+
+-- A quarter of a second after the new song was started, see where REAPER's audio really is.
+-- If it is behind where it should be, REAPER was slow to start (loading the new position from disk).
+local function service_jump_verify()
+  if not jump_verify or reaper.time_precise() < jump_verify.at then return end
+  local v = jump_verify
+  jump_verify = nil
+  local ok, lag = pcall(function()
+    if (reaper.GetPlayState() & 1) ~= 1 then return nil end
+    local rate = reaper.Master_GetPlayRate(0)
+    if not rate or rate <= 0 then rate = 1 end
+    local expected = v.pos + (reaper.time_precise() - v.t_play) * rate
+    return (expected - reaper.GetPlayPosition2()) / rate * 1000
+  end)
+  if jump_diag then jump_diag.start_lag_ms = (ok and lag) or nil end
 end
 -- ────────────────────────────────────────────────────────────────────────────
 
@@ -286,7 +326,18 @@ local function process_command()
 end
 
 local function tick()
+  -- longest gap between ticks in the last couple of seconds (a slow bridge loop = late jumps)
+  local now = reaper.time_precise()
+  if last_tick_t then
+    local gap = now - last_tick_t
+    if now - tick_gap_window_start > 2 then tick_gap_max, tick_gap_window_start = 0, now end
+    if gap > tick_gap_max then tick_gap_max = gap end
+  else
+    tick_gap_window_start = now
+  end
+  last_tick_t = now
   service_pending_jump()
+  service_jump_verify()
   process_command()
   if _should_quit then return end  -- stop deferring; Reaper releases the file
   reaper.SetExtState("GeniusSetList", "heartbeat", tostring(os.time()), false)

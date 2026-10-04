@@ -1196,7 +1196,7 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
     handsOffUntil.current = 0;
     const el = bodyRef.current;
     if (el) { el.scrollTop = 0; el.scrollLeft = 0; }
-  }, [song, sheet.file]);
+  }, [song, sheet?.file]);
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -1217,20 +1217,30 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, nextSong, auto
       </div>
       <div className="sheet-viewer-tabs">
         {sheets.map(t => (
-          <button key={t.file} className={`sheet-viewer-tab${t.file === sheet.file ? " on" : ""}`}
+          <button key={t.file} className={`sheet-viewer-tab${t.file === sheet?.file ? " on" : ""}`}
             onClick={() => onPick(t.file)}>{t.type || "Sheet"}</button>
         ))}
-        {autoScroll && (
+        {autoScroll && sheet && (
           <span className="sheet-viewer-scrollnote">{waitLeft > 0 ? `SCROLL IN ${waitLeft}s` : "AUTO-SCROLL"}</span>
         )}
       </div>
-      <div className="sheet-viewer-body" key={sheet.file} ref={bodyRef}
-        onTouchStart={touchedByHand} onWheel={touchedByHand} onMouseDown={touchedByHand}>
-        {Array.from({ length: sheet.pages }, (_, n) => (
-          <img key={n} className="sheet-viewer-page" src={pageSrc(n)} alt={`${song}, ${sheet.type || "sheet"}, page ${n + 1}`}
-            style={{ width: `${SHEET_ZOOMS[zoomIdx] * 100}%` }} />
-        ))}
-      </div>
+      {sheet ? (
+        <div className="sheet-viewer-body" key={sheet.file} ref={bodyRef}
+          onTouchStart={touchedByHand} onWheel={touchedByHand} onMouseDown={touchedByHand}>
+          {Array.from({ length: sheet.pages }, (_, n) => (
+            <img key={n} className="sheet-viewer-page" src={pageSrc(n)} alt={`${song}, ${sheet.type || "sheet"}, page ${n + 1}`}
+              style={{ width: `${SHEET_ZOOMS[zoomIdx] * 100}%` }} />
+          ))}
+        </div>
+      ) : (
+        // Sheet music mode stays on for a song with no chart: a blank page that says so, so the
+        // screen doesn't jump back to the song list and forth again on the next song.
+        <div className="sheet-viewer-body" key="none">
+          <div className="sheet-viewer-blank" role="img" aria-label="No sheet music available">
+            <span>No Sheet Music Available</span>
+          </div>
+        </div>
+      )}
       {nextSong && (
         <div className="sheet-viewer-next">
           <span className="sheet-viewer-next-lbl">NEXT</span>
@@ -1324,9 +1334,10 @@ function MobileStageView({
   // next/prev, or the setlist moving on by itself — open its chart on the
   // preferred type. With preferences set, only a preferred type is shown (a
   // drummer asked for drums, not whatever the song happens to have); with none
-  // set, the first chart. A song with nothing suitable closes the viewer, so it
-  // never sits on the previous song's chart. Once per song start (the ref), so
-  // closing the chart mid-song isn't undone by the next refresh.
+  // set, the first chart. A song with nothing suitable shows the blank "No Sheet Music
+  // Available" page if the viewer is open (it never sits on the previous song's chart, and
+  // never drops back to the list). Once per song start (the ref), so closing the chart
+  // mid-song isn't undone by the next refresh.
   const autoShownRef = useRef(null);
   useEffect(() => {
     if (!isPlaying) { autoShownRef.current = null; return; }
@@ -1338,13 +1349,16 @@ function MobileStageView({
     const wanted = sheetPrefs.types.length
       ? available.filter(sh => sheetPrefs.types.includes((sh.type || "").toLowerCase()))
       : available;
-    setViewing(wanted.length ? { song: playingName, file: wanted[0].file } : null);
+    setViewing(prev => wanted.length ? { song: playingName, file: wanted[0].file }
+      : prev ? { song: playingName, file: null, type: (sheets.find(sh => sh.file === prev.file)?.type || prev.type || "").toLowerCase() }
+      : null);
   }, [isPlaying, playingName, currentIndex, currentChildIndex, sheetPrefs, sheets, sheetTypeOptions]);
 
   const viewerSheets = viewing ? prioritizedSheetsFor(viewing.song) : [];
-  const showViewer = !!viewing && viewerSheets.length > 0;
-  // Charts can vanish under us (folder changed, project switched) — don't leave an empty viewer.
-  useEffect(() => { if (viewing && viewerSheets.length === 0) setViewing(null); });
+  const showViewer = !!viewing && sheetPrefs.enabled;
+  // Sheet music switched off while a chart was open: close it. (A chart that merely has no
+  // pages for this song shows the blank page instead.)
+  useEffect(() => { if (viewing && !sheetPrefs.enabled) setViewing(null); });
 
   // On the Android app, its overlay menu (reload / re-pair / fullscreen) sits
   // exactly where the viewer's close button is — hide it while a chart is up.
@@ -1376,9 +1390,8 @@ function MobileStageView({
   useBackClose(showSettings, () => { setShowSettings(false); setListeningFor(null); });
   useBackClose(showViewer, () => closeViewer());
 
-  // Keep the song you're on in view as the arrows (or auto-advance, or a tap) move
-  // through the list: the SELECTED row when the selection moves, the PLAYING row when
-  // playback moves. A section that was collapsed over it is opened first.
+  // Keep the song you're on at the top of the list as the arrows (or auto-advance, or a tap) move
+  // through it. A section that was collapsed over it is opened first.
   const stageListRef = useRef(null);
   function revealRow(id) {
     if (!id) return undefined;
@@ -1387,15 +1400,21 @@ function MobileStageView({
     if (parent && stageCollapsed.has(parent.id)) toggleStageCollapsed(parent.id);
     // after the render that opens the section
     const t = setTimeout(() => {
-      stageListRef.current?.querySelector(`[data-row-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+      // The song you're on goes to the TOP of the list (so it reads: this one, then what's next).
+      const list = stageListRef.current;
+      const row = list?.querySelector(`[data-row-id="${id}"]`);
+      if (list && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
     }, 60);
     return () => clearTimeout(t);
   }
+  // While something plays, the PLAYING song is the one held at the top — selecting another song
+  // (to look at its sheet music, say) doesn't move the list. Stopped, it's the selected song.
   useEffect(() => {
+    if (isPlaying) return undefined;
     const id = focusedIndex >= 0 ? playbackItems[focusedIndex]?.id : (focusedNestedItemId || focusedSCItemId);
     return revealRow(id);
-  }, [focusedIndex, focusedNestedItemId, focusedSCItemId]);
-  useEffect(() => revealRow(playingLeaf?.id), [currentIndex, currentChildIndex]);
+  }, [focusedIndex, focusedNestedItemId, focusedSCItemId, isPlaying]);
+  useEffect(() => (isPlaying ? revealRow(playingLeaf?.id) : undefined), [currentIndex, currentChildIndex, isPlaying]);
 
   // Auto-scroll only follows the song that's actually playing (viewing another
   // song's chart while one plays leaves it alone).
@@ -1525,29 +1544,18 @@ function MobileStageView({
 
   // An open chart follows the song: Next/Prev (stopped, they only move the selection) or
   // playback moving on switch it to the new song's chart — the same sheet type when the
-  // song has it, else its first — and a song with no chart closes the viewer.
-  // When it closed itself on a song with no chart, it reopens at the next song that has
-  // one (resumeTypeRef holds the sheet type it was on) — unless the user closed it.
-  const resumeTypeRef = useRef(null);
+  // song has it, else its first. A song with no chart gets the blank "No Sheet Music
+  // Available" page (the viewer stays open, remembering the type, so the next song that
+  // has a chart opens on it again).
   function followSong(name) {
-    if (!name) return;
-    if (!viewing) {
-      if (resumeTypeRef.current === null) return;
-      const list = prioritizedSheetsFor(name);
-      if (!list.length) return;
-      const same = list.find(sh => (sh.type || "").toLowerCase() === resumeTypeRef.current);
-      resumeTypeRef.current = null;
-      setViewing({ song: name, file: (same || list[0]).file });
-      return;
-    }
-    if (viewing.song === name) return;
+    if (!name || !viewing || viewing.song === name) return;
     const list = prioritizedSheetsFor(name);
-    const curType = (viewerSheets.find(sh => sh.file === viewing.file)?.type || "").toLowerCase();
-    if (!list.length) { resumeTypeRef.current = curType; setViewing(null); return; }
+    const curType = (viewerSheets.find(sh => sh.file === viewing.file)?.type || viewing.type || "").toLowerCase();
+    if (!list.length) { setViewing({ song: name, file: null, type: curType }); return; }
     const same = list.find(sh => (sh.type || "").toLowerCase() === curType);
     setViewing({ song: name, file: (same || list[0]).file });
   }
-  function closeViewer() { resumeTypeRef.current = null; setViewing(null); }
+  function closeViewer() { setViewing(null); }
   const lastSelRef = useRef(selName);
   const lastPlayRef = useRef(playingName);
   useEffect(() => {
@@ -3539,21 +3547,10 @@ export default function App() {
         )}
       </header>
 
-      {/* ── Project / MIDI toolbar (admin only — project linking/MIDI setup) ── */}
-      {isAdmin && (projects.length > 0 || (activeSetlist?.midiDevices?.length > 0)) && (
+      {/* ── MIDI devices (admin only). The project/RPP tab bar that used to share this row is gone. ── */}
+      {isAdmin && activeSetlist?.midiDevices?.length > 0 && (
         <div className="project-tabs">
-          {projects.length > 0 && <>
-            <span className="tabs-lbl">PROJECT</span>
-            {projects.map(p => (
-              <button key={p.index}
-                className={`proj-tab${p.index === activeProjIdx ? " on" : ""}`}
-                onClick={() => selectProject(p.index)} title={p.path}>
-                {p.name}
-              </button>
-            ))}
-            <button className="tab-refresh" onClick={fetchProjects} title="Refresh">↺</button>
-          </>}
-          <MidiDeviceBar devices={activeSetlist?.midiDevices || []} availableDevices={midiDevices} />
+          <MidiDeviceBar devices={activeSetlist.midiDevices} availableDevices={midiDevices} />
         </div>
       )}
 

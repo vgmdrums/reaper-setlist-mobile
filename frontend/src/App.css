@@ -1971,3 +1971,37 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 .android:not(.narrow) .app-header { padding-right: 68px; }
 /* Stage view on a wide screen (tablet): same as the phone — no now-playing text in the transport (the Selected display says NOW PLAYING). The empty cell stays so the controls stay centered. */
 .mode-stage:not(.narrow) .t-left > * { display: none; }
+/* Room after the last song, so even the last ones can be scrolled up to the top of the list. */
+.mstage-list::after { content: ""; display: block; height: calc(100% - 70px); flex-shrink: 0; }
+
+/* ── Wide screens: search at the left edge of the bar, the transport centered ── */
+.transport-bar { position: relative; }
+.app:not(.narrow) .t-controls .t-side:first-child { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); }
+.app:not(.narrow) .t-controls .t-side[aria-hidden] { display: none; }
+
+/* ── Tablet (a wide screen in the Android app): bigger, round transport, Play the biggest, all centered
+      on one line; a bigger "connected" section ── */
+.android:not(.narrow) .transport-bar { height: 150px; }
+.android:not(.narrow) .t-controls { align-items: center; }
+.android:not(.narrow) .t-center { align-items: center; gap: 18px; }
+.android:not(.narrow) .t-center .t-btn,
+.android:not(.narrow) .t-controls .t-side .t-btn.t-search {
+  width: 84px; height: 84px; border-radius: 50%; padding: 0; font-size: 32px;
+  display: flex; align-items: center; justify-content: center;
+}
+.android:not(.narrow) .t-center .t-play { width: 124px; height: 124px; font-size: 24px; letter-spacing: .04em; }
+.android:not(.narrow) .mstage-reaper-status { font-size: 22px; padding: 18px 14px; gap: 12px; }
+.android:not(.narrow) .mstage-reaper-dot { width: 15px; height: 15px; }
+.android:not(.narrow) .mstage-bridge-note { font-size: 16px; }
+.android:not(.narrow) .mstage-identity { padding: 14px 20px; }
+.android:not(.narrow) .mstage-identity-text { font-size: 18px; letter-spacing: .04em; }
+.android:not(.narrow) .mstage-settings-btn { font-size: 34px; right: 14px; padding: 8px 14px; }
+
+/* A song with no sheet music, in sheet music mode: a blank page that says so */
+.sheet-viewer-body:has(.sheet-viewer-blank) { display: flex; align-items: flex-start; justify-content: center; padding: 10px 12px; }
+.sheet-viewer-blank {
+  background: #fff; color: #444; width: min(100%, 720px); aspect-ratio: 8.5 / 11; max-height: 100%;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  font-family: var(--ui); font-size: 26px; font-weight: 700; letter-spacing: .02em; padding: 24px;
+}
+.sheet-viewer.inverted .sheet-viewer-blank { filter: invert(1) hue-rotate(180deg); }

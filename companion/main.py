@@ -28,12 +28,12 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.34"
+APP_VERSION = "1.0.35"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 # The genius_bridge.lua in this build reports itself as this version (bridge_version in
 # genius_state.json). REAPER keeps running whatever copy of the script it loaded, so after
 # an update the bridge has to be restarted in REAPER — the page says so while it reports less.
-BRIDGE_VERSION = 6
+BRIDGE_VERSION = 7
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
