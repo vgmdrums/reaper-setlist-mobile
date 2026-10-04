@@ -224,12 +224,13 @@ function ChildRow({ child, parentIdx, childIdx, isSelected, isCurrent, isPlaying
 // ─────────────────────────────────────────────────────────────────────────────
 // ContainerHeader component
 // ─────────────────────────────────────────────────────────────────────────────
-function ContainerHeader({ item, editMode, onCollapse, onRename, onRemove, onAddChild, onToggleSoundcheck, onToggleDisabled, onSelectFirst, activeChildName, hasPACWaiting, totalTime, dragAttrs, dragListeners }) {
+function ContainerHeader({ item, editMode, highlighted, onCollapse, onRename, onRemove, onAddChild, onToggleSoundcheck, onToggleDisabled, onSelectFirst, activeChildName, hasPACWaiting, totalTime, dragAttrs, dragListeners }) {
   const [editing, setEditing] = React.useState(false);
   const [name, setName] = React.useState(item.name);
   function commit() { setEditing(false); onRename(item.id, name); }
   return (
-    <div className={`container-header${item.isSoundcheck ? " soundcheck-hdr" : ""}${item.disabled ? " disabled-hdr" : ""}`}>
+    <div className={`container-header${item.isSoundcheck ? " soundcheck-hdr" : ""}${item.disabled ? " disabled-hdr" : ""}${highlighted ? " highlighted" : ""}`}
+      onClick={e => { if (!editing && !e.target.closest("button, input")) onSelectFirst?.(); }}>
       {editMode && (
         <div className="container-drag" {...dragAttrs} {...dragListeners} title="Drag to reorder">⣿</div>
       )}
@@ -243,7 +244,6 @@ function ContainerHeader({ item, editMode, onCollapse, onRename, onRemove, onAdd
           onKeyDown={e => { if(e.key==="Enter") commit(); if(e.key==="Escape") setEditing(false); }} />
       ) : (
         <span className="container-name"
-          onClick={() => { if (!editing) onSelectFirst?.(); }}
           onDoubleClick={() => editMode && setEditing(true)}>
           {item.name}
           {activeChildName && <span style={{color:'var(--blue)',marginLeft:8,fontWeight:400,textTransform:'none',fontSize:'0.85em'}}>→ {activeChildName}</span>}
@@ -1078,7 +1078,6 @@ const SHEET_ZOOMS = [1, 1.5, 2, 3];
 const TIcon = ({ children }) => <svg className="t-ico" viewBox="0 0 24 24" aria-hidden="true">{children}</svg>;
 const IconPlay   = () => <TIcon><path d="M8.5 5v14l11-7z" fill="currentColor" /></TIcon>;
 const IconPause  = () => <TIcon><path d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z" fill="currentColor" /></TIcon>;
-const IconStop   = () => <TIcon><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" /></TIcon>;
 const IconPrev   = () => <TIcon><path d="M5 5h2v14H5zM19 5v14L8 12z" fill="currentColor" /></TIcon>;
 const IconNext   = () => <TIcon><path d="M17 5h2v14h-2zM5 5v14l11-7z" fill="currentColor" /></TIcon>;
 const IconSearch = () => <TIcon><circle cx="10.5" cy="10.5" r="5.8" fill="none" stroke="currentColor" strokeWidth="2.2" /><path d="M15 15l5 5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></TIcon>;
@@ -1192,7 +1191,7 @@ function splitSongName(name) {
 
 // Fills the stage area (not the whole screen) so the transport bar underneath
 // stays on screen and usable while a chart is up.
-function SheetViewer({ song, sheets, activeFile, onPick, onClose, autoScroll, invert, onToggleInvert }) {
+function SheetViewer({ song, sheets, activeFile, onClose, autoScroll, invert, onToggleInvert }) {
   const [zoomIdx, setZoomIdx] = useState(0);
   const bodyRef = useRef(null);
   const handsOffUntil = useRef(0);
@@ -1232,7 +1231,12 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, autoScroll, in
   return (
     <div className={`sheet-viewer${invert ? " inverted" : ""}`}>
       <div className="sheet-viewer-hdr">
-        <span className="sheet-viewer-spacer" />   {/* the song is named in the Now Playing box below */}
+        {/* Left: the auto-scroll chip (when it's running). The song is named in the Now Playing box below,
+            whose sheet-type chips also switch between this song's charts. */}
+        {autoScroll && sheet && (
+          <span className="sheet-viewer-scrollnote">{waitLeft > 0 ? `SCROLL IN ${waitLeft}s` : "AUTO-SCROLL"}</span>
+        )}
+        <span className="sheet-viewer-spacer" />
         <button className={`sheet-viewer-btn${invert ? " on" : ""}`} onClick={onToggleInvert}
           aria-label="Dark mode" aria-pressed={!!invert} title="Invert colors (dark mode)">☾</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === 0}
@@ -1240,15 +1244,6 @@ function SheetViewer({ song, sheets, activeFile, onPick, onClose, autoScroll, in
         <button className="sheet-viewer-btn" disabled={zoomIdx === SHEET_ZOOMS.length - 1}
           onClick={() => setZoomIdx(i => i + 1)} aria-label="Zoom in">+</button>
         <button className="sheet-viewer-btn" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      <div className="sheet-viewer-tabs">
-        {sheets.map(t => (
-          <button key={t.file} className={`sheet-viewer-tab${t.file === sheet?.file ? " on" : ""}`}
-            onClick={() => onPick(t.file)}>{t.type || "Sheet"}</button>
-        ))}
-        {autoScroll && sheet && (
-          <span className="sheet-viewer-scrollnote">{waitLeft > 0 ? `SCROLL IN ${waitLeft}s` : "AUTO-SCROLL"}</span>
-        )}
       </div>
       {sheet ? (
         <div className="sheet-viewer-body" key={sheet.file} ref={bodyRef}
@@ -1456,8 +1451,11 @@ function MobileStageView({
   useEffect(() => {
     if (listeningFor || !canControl) return;
     function onKeyDown(e) {
-      const tag = document.activeElement?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      // Don't fire while typing — but a checkbox / slider / button that happens to have focus isn't typing.
+      const ae = document.activeElement;
+      const typing = ae?.tagName === "TEXTAREA"
+        || (ae?.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit"].includes(ae.type));
+      if (typing) return;
       const k = normalizeKey(e);
       const action = Object.keys(hotkeys).find(a => hotkeys[a] === k);
       if (!action) return;
@@ -1711,7 +1709,7 @@ function MobileStageView({
 
       {showViewer && (
         <SheetViewer song={viewing.song} sheets={viewerSheets} activeFile={viewing.file}
-          onPick={file => setViewing(v => ({ ...v, file }))} onClose={closeViewer}
+          onClose={closeViewer}
           autoScroll={autoScroll} invert={sheetPrefs.invert}
           onToggleInvert={() => updateSheetPrefs({ invert: !sheetPrefs.invert })} />
       )}
@@ -1757,7 +1755,8 @@ function MobileStageView({
           {sheetPrefs.enabled && <div className="mstage-sel-sheets">
             {sheetsFor(selName).length > 0
               ? prioritizedSheetsFor(selName).map(sh => (
-                <button key={sh.file} className="mstage-sheet-btn"
+                <button key={sh.file}
+                  className={`mstage-sheet-btn${showViewer && viewing.song === selName && viewing.file === sh.file ? " on" : ""}`}
                   onClick={() => setViewing({ song: selName, file: sh.file })}>
                   {sh.type || "Sheet"}
                 </button>
@@ -1988,6 +1987,11 @@ export default function App() {
   const [showConsole,   setShowConsole]  = useState(false);
   const [showDrawer,    setShowDrawer]   = useState(false);
   const [showSongSearch, setShowSongSearch] = useState(false);
+  // The section highlighted in the editor: regions you add go into it (a new section is highlighted when
+  // it's created; clicking a section's header highlights it; selecting any song clears it).
+  const [focusedContainerId, setFocusedContainerId] = useState(null);
+  const focusedContainerIdRef = useRef(null);
+  useEffect(() => { focusedContainerIdRef.current = focusedContainerId; }, [focusedContainerId]);
   const [recentSongs, setRecentSongs] = useState(loadRecentSongs);
   const [confirmDlg,    setConfirmDlg]   = useState(null);   // {title, message, confirmLabel, onConfirm}
   const [narrow,        setNarrow]       = useState(false);
@@ -2348,6 +2352,9 @@ export default function App() {
   }
 
   function addToSetlist(region) {
+    // A section is highlighted: the region goes into it (at its end).
+    const hl = focusedContainerIdRef.current;
+    if (hl && setlistItemsRef.current.some(i => i.id === hl && i.isContainer)) { addToContainer(hl, region); return; }
     const newItem = { ...region, id: uid(), region_id: region.id, region_index: region.index };
     const focusedId = focusedIndexRef.current >= 0 ? playbackItemsRef.current[focusedIndexRef.current]?.id : null;
 
@@ -2489,6 +2496,9 @@ export default function App() {
       next.splice(topIdx + 1, 0, newItem);
       return next;
     });
+    // highlight it, so the next region you click goes into it
+    setFocusedIndex(-1); setFocusedNestedItemId(null); setFocusedSCItemId(null);
+    setFocusedContainerId(newItem.id);
   }
 
   function addToContainer(containerItemId, region) {
@@ -3495,6 +3505,11 @@ export default function App() {
   // Where Next/Prev start from: the playing song, or — when stopped — the selected one.
   const navIndex = isPlaying ? currentIndex : (focusedIndex >= 0 ? focusedIndex : currentIndex);
 
+  // Selecting a song (anywhere) ends the section highlight.
+  useEffect(() => {
+    if (focusedIndex >= 0 || focusedNestedItemId || focusedSCItemId) setFocusedContainerId(null);
+  }, [focusedIndex, focusedNestedItemId, focusedSCItemId]);
+
   // Back gesture closes the topmost overlay (registered in the order they open);
   // an admin in Edit mode goes back to Stage before anything leaves the app.
   useBackClose(isAdmin && mode === "edit", () => setMode("stage"));
@@ -3604,15 +3619,6 @@ export default function App() {
           )}
           <button className="hdr-btn" onClick={fetchInstructions} title="Help / Setup Instructions" style={{fontFamily:"var(--mono)",fontWeight:700}}>?</button>
           <button className="hdr-btn" onClick={() => setShowConsole(true)} title="Console / Diagnostics">⌨</button>
-          <div className="pos-disp">
-            {nowPlayingName && <span className="pos-track">{nowPlayingName}</span>}
-            <div className="pos-times">
-              <span className="pos-elapsed">{fmtClock(scLiveItem ? scElapsed : stageElapsed)}</span>
-              <span className="pos-sep"> / </span>
-              <span className="pos-total">{fmtClock(scLiveItem ? scTotal : stageTotalTime)}</span>
-              {(scLiveItem ? scTotal > 0 : stageTotalTime > 0) && <><span className="pos-sep"> | </span><span className="pos-remaining">-{fmtClock(scLiveItem ? scRemaining : stageRemaining)}</span></>}
-            </div>
-          </div>
         </div>
         )}
       </header>
@@ -3812,7 +3818,14 @@ export default function App() {
                                     }
                                     return t;
                                   })()}
+                                  highlighted={item.id === focusedContainerId}
                                   onSelectFirst={() => {
+                                    if (mode === "edit") {
+                                      // Editing: the click highlights the SECTION — regions you add now go into it.
+                                      setFocusedIndex(-1); setFocusedNestedItemId(null); setFocusedSCItemId(null);
+                                      setFocusedContainerId(item.id);
+                                      return;
+                                    }
                                     if (item.isSoundcheck) {
                                       const first = (item.children || [])[0];
                                       if (first) { setFocusedSCItemId(first.id); setFocusedIndex(-1); }
@@ -4107,7 +4120,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Three cells of a grid with equal outer columns: [Search, Prev] [PLAY] [Stop, Next]. Play is the
+        {/* Three cells of a grid with equal outer columns: [Search, Prev] [PLAY] [Next]. Play is the
             middle cell, so it sits at the exact center of the bar; Search is at the far left. Where
             there is no Search button (not an admin) an empty slot of the same size keeps it that way. */}
         <div className="t-controls">
@@ -4131,7 +4144,6 @@ export default function App() {
             })()}
           </div>
           <div className="t-center t-grp-r">
-            <button className="t-btn t-stop" onClick={stopPlayback} disabled={!canControl || !isPlaying} title="Stop"><IconStop /></button>
             <button className="t-btn" onClick={() => stepSong(1)} disabled={!canControl || navIndex >= playbackItems.length-1} title="Next"><IconNext /></button>
           </div>
         </div>

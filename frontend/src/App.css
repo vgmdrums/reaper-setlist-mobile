@@ -1804,25 +1804,25 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
    Stacked full-width, top to bottom: Now Playing, setlist item/time count,
    then the transport buttons — each row using the full screen width rather
    than squeezed side by side, easiest-to-reach row (buttons) at the bottom. */
-.narrow.mode-stage .transport-bar {
+.narrow.app .transport-bar {
   display: flex; flex-direction: column;
   height: auto; min-height: 150px; padding: 8px 14px; gap: 8px;
 }
-.narrow.mode-stage .t-left { order: 1; width: 100%; }
-.narrow.mode-stage .now-playing { width: 100%; }
-.narrow.mode-stage .now-playing > div { flex: 1; min-width: 0; }
-.narrow.mode-stage .np-name { max-width: 100%; font-size: 17px; }
-.narrow.mode-stage .np-ready { width: 100%; text-align: center; }
-.narrow.mode-stage .t-right {
+.narrow.app .t-left { order: 1; width: 100%; }
+.narrow.app .now-playing { width: 100%; }
+.narrow.app .now-playing > div { flex: 1; min-width: 0; }
+.narrow.app .np-name { max-width: 100%; font-size: 17px; }
+.narrow.app .np-ready { width: 100%; text-align: center; }
+.narrow.app .t-right {
   order: 2; width: 100%; flex-direction: row; align-items: center; justify-content: center; gap: 10px;
 }
-.narrow.mode-stage .t-controls { order: 3; width: 100%; }
-.narrow.mode-stage .t-center { flex: 1; min-width: 0; display: flex; gap: 6px; }
-.narrow.mode-stage .t-controls .t-side .t-btn.t-search { height: 80px; }
-.narrow.mode-stage .t-center .t-btn {
+.narrow.app .t-controls { order: 3; width: 100%; }
+.narrow.app .t-center { flex: 1; min-width: 0; display: flex; gap: 6px; }
+.narrow.app .t-controls .t-side .t-btn.t-search { height: 80px; }
+.narrow.app .t-center .t-btn {
   flex: 1; min-height: 80px; font-size: 15px; flex-direction: column; gap: 4px;
 }
-.narrow.mode-stage .t-center .t-play { flex: 1.8; font-size: 20px; }
+.narrow.app .t-center .t-play { flex: 1.8; font-size: 20px; }
 
 /* CSS-drawn pause icon — the ⏸ emoji renders as a colorful platform glyph
    on mobile (Android/iOS), clashing with the app's flat dark UI. */
@@ -1965,12 +1965,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 
 /* Stage view on a phone: no "now playing" text in the transport — it changed size and moved the
    controls. The Selected display above says NOW PLAYING instead; the bar keeps its fixed size. */
-.narrow.mode-stage .t-left { display: none; }
+.narrow.app .t-left { display: none; }
 .active-setlist-name { max-width: 22vw; }
 /* wide screens in the Android app: keep the header's right end clear of the app's floating menu button */
 .android:not(.narrow) .app-header { padding-right: 68px; }
 /* Stage view on a wide screen (tablet): same as the phone — no now-playing text in the transport (the Selected display says NOW PLAYING). The empty cell stays so the controls stay centered. */
-.mode-stage:not(.narrow) .t-left > * { display: none; }
+.app:not(.narrow) .t-left > * { display: none; }
 /* Room after the last song, so even the last ones can be scrolled up to the top of the list. */
 .mstage-list::after { content: ""; display: block; height: calc(100% - 70px); flex-shrink: 0; }
 
@@ -2047,13 +2047,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 
 /* wide screens: in Stage view the controls span the whole bar (Play = the bar's center, Search at the far left);
    the ITEMS / total readout stays at the right edge. In Edit view they keep the middle column. */
-.mode-stage:not(.narrow) .transport-bar .t-controls { grid-column: 1 / -1; grid-row: 1; }
-.mode-stage:not(.narrow) .transport-bar .t-right { grid-column: 3; grid-row: 1; justify-self: end; z-index: 1; }
+.app:not(.narrow) .transport-bar .t-controls { grid-column: 1 / -1; grid-row: 1; }
+.app:not(.narrow) .transport-bar .t-right { grid-column: 3; grid-row: 1; justify-self: end; z-index: 1; }
 
 /* phone: same grid; sizes fit 360 px (94 + 120 + 94 + gaps) */
 .narrow .t-controls .t-mid .t-play { flex: 0 0 auto; width: 120px; font-size: 26px; }
 .narrow .t-controls .t-btn.t-search { flex: 0 0 44px; }
-.narrow.mode-stage .t-controls .t-btn.t-search { height: 80px; }
+.narrow.app .t-controls .t-btn.t-search { height: 80px; }
 .narrow .t-controls .t-center { gap: 6px; flex: none; }
 
 /* tablet: round buttons, Play biggest; the empty slot matches the Search button */
@@ -2110,3 +2110,11 @@ button:not(:disabled):active {
 .android:not(.narrow) .mstage-up { min-height: 64px; padding: 12px 20px; }
 .android:not(.narrow) .mstage-up-lbl { font-size: 15px; }
 .android:not(.narrow) .mstage-up-name { font-size: calc(26px * var(--list-zoom)); }
+
+/* The chart's toolbar is a single row: auto-scroll chip at the left, buttons at the right. The tabs row is gone. */
+.sheet-viewer-scrollnote { margin-left: 0; margin-right: 6px; align-self: center; }
+.mstage-sheet-btn.on { background: var(--green); color: #05140b; border-color: var(--green); }
+
+/* the section that regions are being added to */
+.container-header.highlighted { box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px var(--accent); background: rgba(232,67,147,.12); }
+.container-header.highlighted .container-name { color: var(--accent); }

@@ -3,6 +3,7 @@ package com.geniusapps.setlistmobile
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.graphics.Bitmap
 import android.webkit.JavascriptInterface
@@ -66,6 +67,15 @@ class MainActivity : AppCompatActivity() {
         // (e.g. missing a feature) long after the companion was updated.
         webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
         val menuButton = findViewById<ImageButton>(R.id.menuButton)
+        // Hotkeys: a Bluetooth keyboard or page-turner pedal sends key presses (arrow keys, Page Up/Down...)
+        // that the page's hotkeys listen for. Android only delivers them to the view that has focus, and an
+        // arrow key otherwise just moves focus around — onto the little menu button, say. So: the menu
+        // button is touch-only and never takes focus, and the WebView always owns it (see dispatchKeyEvent).
+        menuButton.isFocusable = false
+        menuButton.isFocusableInTouchMode = false
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
+        webView.requestFocus()
         webView.webViewClient = object : WebViewClient() {
             // A page that hid the menu (the sheet-music viewer) mustn't leave it hidden after a reload.
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -75,6 +85,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 spinner.visibility = View.GONE
+                view.requestFocus()   // a fresh page starts with the key presses going to it
             }
         }
         // The web app hides this overlay menu while a sheet-music chart is open: it
@@ -214,6 +225,13 @@ class MainActivity : AppCompatActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus && fullscreenEnabled) enableFullscreen() // re-hide after a transient swipe-reveal or app resume
+    }
+
+    /** Key presses belong to the page (its hotkeys): if anything else — or nothing — has focus, give it back
+     * to the WebView before the key is dispatched, so an arrow key isn't spent on moving Android's focus. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!webView.hasFocus()) webView.requestFocus()
+        return super.dispatchKeyEvent(event)
     }
 
     /** skipAutoUsb: this is a deliberate stop at the pairing screen (an explicit
