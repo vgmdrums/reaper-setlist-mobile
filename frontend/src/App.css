@@ -28,7 +28,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 
 /* ── Header ── */
 .app-header{
-  display:grid;grid-template-columns:1fr auto 1fr;
+  display:grid;grid-template-columns:auto 1fr;
   align-items:center;gap:12px;
   padding:0 16px;height:52px;
   background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0
@@ -1966,3 +1966,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
 /* Stage view on a phone: no "now playing" text in the transport — it changed size and moved the
    controls. The Selected display above says NOW PLAYING instead; the bar keeps its fixed size. */
 .narrow.mode-stage .t-left { display: none; }
+.active-setlist-name { max-width: 22vw; }
+/* wide screens in the Android app: keep the header's right end clear of the app's floating menu button */
+.android:not(.narrow) .app-header { padding-right: 68px; }
