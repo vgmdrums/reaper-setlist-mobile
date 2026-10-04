@@ -1106,6 +1106,15 @@ function sheetPageUrl(file, v, n) {
     + (PAIR_TOKEN ? `&token=${encodeURIComponent(PAIR_TOKEN)}` : "");
 }
 const SHEET_PREFS_KEY = "stageSheetPrefs";
+// "Setlist text size": scales the song names in the Stage list and the Now Playing area (percent).
+const LIST_ZOOM_KEY = "stageListZoom";
+const LIST_ZOOM_MIN = 100, LIST_ZOOM_MAX = 250;
+function loadListZoom() {
+  try {
+    const n = Math.round(Number(localStorage.getItem(LIST_ZOOM_KEY)));
+    return Number.isFinite(n) && n >= LIST_ZOOM_MIN && n <= LIST_ZOOM_MAX ? n : 100;
+  } catch { return 100; }
+}
 const SHEET_PREFS_EVENT = "sheetprefs-changed";   // tells the App when the master switch moves
 const NO_SHEETS = [];
 // Types the Settings checkboxes always offer; any other type found in the
@@ -1292,6 +1301,11 @@ function MobileStageView({
 }) {
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   const [sheetPrefs, setSheetPrefs] = useState(loadSheetPrefs);
+  const [listZoom, setListZoomState] = useState(loadListZoom);
+  function setListZoom(n) {
+    setListZoomState(n);
+    try { localStorage.setItem(LIST_ZOOM_KEY, String(n)); } catch (e) { /* storage blocked — still works this session */ }
+  }
   // "Enable sheet music" off: no sheets exist as far as everything below is concerned.
   const sheets = sheetPrefs.enabled ? allSheets : NO_SHEETS;
   // Every chart of a song: the PDFs named "{region} - {type}.pdf" for its region
@@ -1610,7 +1624,7 @@ function MobileStageView({
   const reaperLabel = !wsConnected ? "OFFLINE" : !reaperConnected ? "REAPER NOT CONNECTED" : "REAPER CONNECTED";
 
   return (
-    <div className="mstage">
+    <div className="mstage" style={{ "--list-zoom": listZoom / 100 }}>
       {/* Own full-width row, not a small header badge — this is the one
           thing everything else on this screen depends on, so it needs to
           be impossible to miss on a phone. */}
@@ -1702,8 +1716,12 @@ function MobileStageView({
 
       {selName && (
         <div className="mstage-sel">
-          <div className="mstage-sel-lbl">{selPlaying ? "NOW PLAYING" : "SELECTED"}{selContainer ? ` · ${selContainer}` : ""}</div>
-          <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
+          <div className="mstage-sel-lbl">NOW PLAYING{selContainer ? ` · ${selContainer}` : ""}</div>
+          <div className="mstage-sel-namerow">
+            {/* green and flashing while this song is playing; a quiet grey dot otherwise, so the name never shifts */}
+            <span className={`mstage-live-dot${selPlaying ? " on" : ""}`} aria-label={selPlaying ? "Playing" : "Not playing"} />
+            <div className={`mstage-sel-name${selPlaying ? " playing" : ""}`}>{selName}</div>
+          </div>
           {/* Always one row of chips, so the bar (and the song name) never changes size
               between songs: a placeholder chip stands in when there's no sheet music. */}
           {sheetPrefs.enabled && <div className="mstage-sel-sheets">
@@ -1746,8 +1764,18 @@ function MobileStageView({
               <button className="fm-close" onClick={() => { setShowSettings(false); setListeningFor(null); }}>✕</button>
             </div>
             <div className="modal-body">
-              {canFullscreen && (<>
               <div className="settings-section-title">DISPLAY</div>
+              <div className="settings-zoom">
+                <span>Setlist text size</span>
+                <input type="range" min={LIST_ZOOM_MIN} max={LIST_ZOOM_MAX} step="10" value={listZoom}
+                  onChange={e => setListZoom(Number(e.target.value))} aria-label="Setlist text size" />
+                <span className="settings-zoom-val">{listZoom}%</span>
+              </div>
+              <p className="sd-hint">
+                Makes the song names in the list and in the Now Playing area bigger. A name too long for
+                the screen stays on one line and is cut off.
+              </p>
+              {canFullscreen && (<>
               <label className="settings-check">
                 <input type="checkbox" checked={fullscreen} onChange={e => toggleFullscreen(e.target.checked)} />
                 <span>Full screen</span>

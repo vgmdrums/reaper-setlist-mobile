@@ -2005,3 +2005,26 @@ body{background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px
   font-family: var(--ui); font-size: 26px; font-weight: 700; letter-spacing: .02em; padding: 24px;
 }
 .sheet-viewer.inverted .sheet-viewer-blank { filter: invert(1) hue-rotate(180deg); }
+
+/* "(no sheet music)" in the Selected bar: greyed out */
+.mstage-sheet-btn.none { opacity: 1; color: var(--text3); border-color: var(--border2); background: transparent; border-style: dashed; }
+
+/* Setlist text size (Settings): --list-zoom is 1.0 .. 2.5 */
+.mstage { --list-zoom: 1; }
+.mstage-name { font-size: calc(20px * var(--list-zoom)); }
+.mstage-row { min-height: calc(66px * var(--list-zoom)); }
+.mstage-row.sub { min-height: calc(56px * var(--list-zoom)); }
+.mstage-dur { font-size: calc(13px * var(--list-zoom)); }
+.mstage-sel-name { font-size: calc(44px * var(--list-zoom)); flex: 1; min-width: 0; }
+.settings-zoom { display: flex; align-items: center; gap: 14px; min-height: 48px; font-size: 16px; }
+.settings-zoom input[type=range] { flex: 1; min-width: 0; height: 32px; accent-color: var(--green); }
+.settings-zoom-val { min-width: 48px; text-align: right; font-family: var(--mono); color: var(--text2); }
+
+/* Now Playing: the name with a green flashing dot beside it */
+.mstage-sel-namerow { display: flex; align-items: center; gap: calc(12px * var(--list-zoom)); min-width: 0; }
+.mstage-live-dot {
+  flex-shrink: 0; width: calc(20px * var(--list-zoom)); height: calc(20px * var(--list-zoom)); border-radius: 50%;
+  background: var(--border2);
+}
+.mstage-live-dot.on { background: var(--green); box-shadow: 0 0 10px var(--green); animation: live-flash 1s ease-in-out infinite; }
+@keyframes live-flash { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
