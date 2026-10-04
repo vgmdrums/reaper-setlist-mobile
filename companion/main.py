@@ -28,7 +28,7 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.28"
+APP_VERSION = "1.0.29"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 # The genius_bridge.lua in this build reports itself as this version (bridge_version in
 # genius_state.json). REAPER keeps running whatever copy of the script it loaded, so after
@@ -1212,19 +1212,28 @@ def set_phrase_for_tray(phrase: str) -> str:
     return pairing.set_phrase(phrase)
 
 def ensure_autostart():
-    """Create a Startup-folder shortcut (once) so the companion launches at
-    login — no admin elevation needed, unlike the old exe's scheduled-task
-    approach. Safe to call on every launch; skips if the shortcut exists."""
+    """Create a Startup-folder shortcut so the companion launches at login — no admin
+    elevation needed, unlike the old exe's scheduled-task approach. Safe to call on every
+    launch. An existing shortcut is left alone, with one exception: the installed exe
+    repoints it when it targets something else (typically a dev checkout's python.exe +
+    main.py left by running from source, which the installed app would otherwise never
+    correct, so the app wouldn't really start at login)."""
     try:
         import win32com.client
         startup_dir = os.path.join(os.environ["APPDATA"], "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
         shortcut_path = os.path.join(startup_dir, "Genius SetList Mobile.lnk")
-        if os.path.exists(shortcut_path):
-            return
-        target = sys.executable
-        args = "" if getattr(sys, "frozen", False) else f'"{os.path.abspath(__file__)}"'
-        workdir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+        frozen = getattr(sys, "frozen", False)
         shell = win32com.client.Dispatch("WScript.Shell")
+        if os.path.exists(shortcut_path):
+            if not frozen:
+                return
+            cur = shell.CreateShortCut(shortcut_path)
+            if os.path.normcase(cur.TargetPath) == os.path.normcase(sys.executable) and not cur.Arguments:
+                return
+            print(f"  Auto-start shortcut pointed at {cur.TargetPath} {cur.Arguments} — repointing it here")
+        target = sys.executable
+        args = "" if frozen else f'"{os.path.abspath(__file__)}"'
+        workdir = os.path.dirname(os.path.abspath(sys.executable if frozen else __file__))
         shortcut = shell.CreateShortCut(shortcut_path)
         shortcut.TargetPath = target
         shortcut.Arguments = args
@@ -1236,6 +1245,40 @@ def ensure_autostart():
         print(f"  Auto-start shortcut created: {shortcut_path}")
     except Exception as e:
         print(f"  Warning: could not set up auto-start: {e}")
+
+# REAPER runs Scripts/__startup.lua every time it starts, so a few lines there start the
+# bridge with REAPER (instead of Actions > Run ReaScript by hand each session). Only the
+# marked block is ours — anything else already in the file is left untouched. The bridge's
+# own heartbeat guard makes a second start (say, the registered action as well) a no-op.
+_BRIDGE_STARTUP_BEGIN = "-- >>> Genius SetList Mobile (managed by the companion app) >>>"
+_BRIDGE_STARTUP_END = "-- <<< Genius SetList Mobile <<<"
+_BRIDGE_STARTUP_BLOCK = (
+    f"{_BRIDGE_STARTUP_BEGIN}\n"
+    "-- Starts the Genius SetList bridge whenever REAPER starts. Delete this block to stop that.\n"
+    "do\n"
+    "  local bridge = reaper.GetResourcePath() .. \"/Scripts/genius_bridge.lua\"\n"
+    "  if reaper.file_exists(bridge) then dofile(bridge) end\n"
+    "end\n"
+    f"{_BRIDGE_STARTUP_END}\n"
+)
+
+def ensure_bridge_autostart() -> str:
+    """Make REAPER start the bridge on launch. Returns a short log line."""
+    path = os.path.join(REAPER_RESOURCE, "Scripts", "__startup.lua")
+    try:
+        existing = ""
+        if os.path.exists(path):
+            with open(path, encoding="utf-8", errors="replace", newline="") as f:
+                existing = f.read()
+            if _BRIDGE_STARTUP_BEGIN in existing:
+                return "REAPER start-up script already starts the bridge"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        lead = "" if not existing else ("" if existing.endswith("\n") else "\n") + "\n"
+        with open(path, "a", encoding="utf-8", newline="") as f:
+            f.write(lead + _BRIDGE_STARTUP_BLOCK)
+        return f"Added the bridge to REAPER's start-up script: {path}"
+    except OSError as e:
+        return f"Could not set up REAPER start-up for the bridge: {e}"
 
 FIREWALL_RULE_NAME = "Genius SetList Mobile"
 FIREWALL_RULE_NAME_DISCOVERY = "Genius SetList Mobile (pairing discovery)"
@@ -1324,6 +1367,7 @@ if __name__ == "__main__":
     _bi = install_bridge()
     for _line in _bi.get("log", []):
         print(f"  [bridge] {_line}")
+    print(f"  [bridge] {ensure_bridge_autostart()}")
 
     threading.Thread(target=start_server, daemon=True).start()
     if not wait_for_server(PORT):
