@@ -1250,8 +1250,6 @@ function SheetViewer({ song, sheets, activeFile, onClose, autoScroll, invert, on
           <span className="sheet-viewer-scrollnote">{waitLeft > 0 ? `SCROLL IN ${waitLeft}s` : "AUTO-SCROLL"}</span>
         )}
         <span className="sheet-viewer-spacer" />
-        <button className={`sheet-viewer-btn${invert ? " on" : ""}`} onClick={onToggleInvert}
-          aria-label="Dark mode" aria-pressed={!!invert} title="Invert colors (dark mode)">☾</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === 0}
           onClick={() => setZoomIdx(i => i - 1)} aria-label="Zoom out">−</button>
         <button className="sheet-viewer-btn" disabled={zoomIdx === SHEET_ZOOMS.length - 1}
@@ -1439,7 +1437,7 @@ function DeviceSettings({ ds, canControl }) {
                 <input type="checkbox" checked={sheetPrefs.invert} onChange={e => updateSheetPrefs({ invert: e.target.checked })} />
                 <span>Invert sheet music colors (dark mode)</span>
               </label>
-              <p className="sd-hint">White-on-black charts, easier on the eyes on a dark stage. Also on the ☾ button above any chart.</p>
+              <p className="sd-hint">White-on-black charts, easier on the eyes on a dark stage.</p>
               <label className="settings-check">
                 <input type="checkbox" checked={sheetPrefs.auto} onChange={e => updateSheetPrefs({ auto: e.target.checked })} />
                 <span>Automatically show sheet music</span>
