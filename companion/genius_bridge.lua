@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v9 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position; updates itself)
+-- Genius SetList Bridge Script v10 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position; updates itself; instance id)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -22,6 +22,8 @@ local STATE_FILE  = reaper.GetResourcePath() .. "/genius_state.json"
 local CMD_FILE    = reaper.GetResourcePath() .. "/genius_cmd.json"
 local last_cmd_id = ""
 local _should_quit = false
+-- Identifies this running copy in the state file, so the companion can tell if two copies are both writing it.
+local INSTANCE = string.format("%x-%x", os.time(), math.floor(reaper.time_precise() * 1000) % 1000000)
 local jump_diag, jump_verify = nil, nil                     -- timing diagnostics of the last beat-aligned jump
 local last_tick_t, tick_gap_max, tick_gap_window_start = nil, 0, 0
 
@@ -178,7 +180,8 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":9,"is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
+    '{"bridge_version":10,"instance":"%s","is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
+    INSTANCE,
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
     pos, esc(proj_path), esc(proj_name),

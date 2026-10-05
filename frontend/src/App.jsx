@@ -2101,6 +2101,11 @@ export default function App() {
   // The genius_bridge.lua running in REAPER is older than the one this companion ships (it
   // only picks up a new copy when restarted) — some features, like beat-aligned song changes, need the new one.
   const [bridgeOutdated, setBridgeOutdated] = useState(false);
+  // The banner must not flicker: a REAPER hiccup or two bridge copies taking turns writing the state file
+  // would otherwise flip "connected" / "restart the bridge" on and off several times a second.
+  const bridgeCurrentAtRef = useRef(0);         // last time the bridge reported an up-to-date version
+  const bridgeOutdatedSinceRef = useRef(0);     // when it started reporting an old one (0 = it isn't)
+  const reaperDownSinceRef = useRef(0);         // when REAPER first looked disconnected (0 = it doesn't)
   // REAPER's position in quarter notes and its tempo — the Now Playing light pulses on each quarter note.
   const [beat, setBeat] = useState({ qn: null, bpm: 0 });
   const ds = useDeviceSettings(sheets);          // per-device settings + the Settings screen (shared by Stage and Edit)
@@ -2129,6 +2134,7 @@ export default function App() {
     };
     ws.onclose = () => {
       setWsConnected(false);
+      reaperDownSinceRef.current = 0; bridgeOutdatedSinceRef.current = 0;
       setReaperConnected(false);
       setRegions([]);       // clear regions when disconnected
       setProjects([]);
@@ -2136,7 +2142,15 @@ export default function App() {
     };
     ws.onmessage = e => {
       const m = JSON.parse(e.data);
-      if (m.reaper_connected !== undefined) setReaperConnected(m.reaper_connected);
+      if (m.reaper_connected !== undefined) {
+        if (m.reaper_connected) { reaperDownSinceRef.current = 0; setReaperConnected(true); }
+        else {
+          // only believe "not connected" once it has lasted a few seconds
+          const nowT = Date.now();
+          if (!reaperDownSinceRef.current) reaperDownSinceRef.current = nowT;
+          if (nowT - reaperDownSinceRef.current >= 4000) setReaperConnected(false);
+        }
+      }
       if (m.is_playing !== undefined) { reaperIsPlayingRef.current = m.is_playing; setIsPlaying(m.is_playing); }
       if (m.position   !== undefined) {
         // A real update inside the song we just started (not the server echoing our own
@@ -2147,7 +2161,17 @@ export default function App() {
         setPosition(m.position);
       }
       if (m.peaks      !== undefined) setTrackPeaks(m.peaks);
-      if (m.bridge_latest !== undefined) setBridgeOutdated((m.bridge_version || 0) < m.bridge_latest);
+      if (m.bridge_latest !== undefined && m.bridge_version) {
+        // "restart the bridge" shows only once an old version has been reported steadily for a few seconds,
+        // with no up-to-date report in between.
+        const nowT = Date.now();
+        if (m.bridge_version >= m.bridge_latest) {
+          bridgeCurrentAtRef.current = nowT; bridgeOutdatedSinceRef.current = 0; setBridgeOutdated(false);
+        } else {
+          if (!bridgeOutdatedSinceRef.current) bridgeOutdatedSinceRef.current = nowT;
+          if (nowT - bridgeOutdatedSinceRef.current >= 4000 && nowT - bridgeCurrentAtRef.current >= 10000) setBridgeOutdated(true);
+        }
+      }
       if (m.bpm !== undefined) setBeat(prev => (prev.qn === m.qn && prev.bpm === m.bpm) ? prev : { qn: m.qn, bpm: m.bpm });
       // REAPER is playing a song this page didn't start (the app was just opened or reloaded mid-show): find it
       // in the setlist by the active region, so the Now Playing / Up Next boxes and the list follow it.

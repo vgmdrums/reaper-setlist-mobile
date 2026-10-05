@@ -28,12 +28,12 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.42"
+APP_VERSION = "1.0.43"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 # The genius_bridge.lua in this build reports itself as this version (bridge_version in
 # genius_state.json). REAPER keeps running whatever copy of the script it loaded, so after
 # an update the bridge has to be restarted in REAPER — the page says so while it reports less.
-BRIDGE_VERSION = 9
+BRIDGE_VERSION = 10
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
@@ -90,6 +90,39 @@ def read_bridge_state() -> dict:
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
     return _state_cache
+
+# ── Bridge event log ──────────────────────────────────────────────────────────
+# Connection drops and changes of which bridge copy is writing the state file go to bridge_events.log
+# (next to the setlists), so an intermittent "REAPER not connected" / "restart the bridge" can be traced.
+def _bridge_log_path() -> str:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = os.path.join(base, "GeniusSetListMobile")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "bridge_events.log")
+
+def _bridge_monitor():
+    path = None
+    last = None
+    while True:
+        time.sleep(0.2)
+        try:
+            if path is None:
+                path = _bridge_log_path()
+            try:
+                age = time.time() - os.path.getmtime(STATE_FILE)
+            except OSError:
+                age = None
+            st = read_bridge_state()
+            sig = (age is not None and age < 3.0, st.get("bridge_version"), st.get("instance"))
+            if sig != last:
+                last = sig
+                if os.path.exists(path) and os.path.getsize(path) > 200_000:
+                    os.remove(path)
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} connected={sig[0]} bridge_version={sig[1]} "
+                            f"instance={sig[2]} state_age={'-' if age is None else f'{age:.1f}s'}\n")
+        except Exception:
+            pass
 
 def bridge_connected() -> bool:
     try:
@@ -1363,6 +1396,7 @@ if __name__ == "__main__":
     # gets created," never "the app never starts."
     threading.Thread(target=request_firewall_access, daemon=True).start()
     threading.Thread(target=update_check_loop, daemon=True).start()
+    threading.Thread(target=_bridge_monitor, daemon=True).start()
     threading.Thread(target=usb_tether_loop, daemon=True).start()
 
     _bi = install_bridge()
