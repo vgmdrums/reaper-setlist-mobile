@@ -2136,3 +2136,14 @@ button:not(:disabled):active {
 .app:not(.narrow) .t-left { display: none; }          /* its (hidden) content left an empty cell that got auto-placed into a 2nd grid row */
 .narrow.app .transport-bar { position: relative; justify-content: center; }
 .narrow.app .t-right { position: absolute; top: 5px; left: 0; right: 0; width: auto; justify-content: center; pointer-events: none; }
+
+/* ══ Phone: round transport buttons; Search is just an icon (no circle) ══ */
+.narrow .t-controls .t-center .t-btn:not(.t-search) { border-radius: 50%; flex: 0 0 auto; padding: 0; }
+.narrow .t-controls .t-center .t-btn:not(.t-search):not(.t-play) { width: 60px; height: 60px; min-height: 0; font-size: 22px; }
+.narrow .t-controls .t-mid .t-play { width: 84px; height: 84px; min-height: 0; font-size: 34px; }
+.narrow .t-controls .t-btn.t-search,
+.narrow.app .t-controls .t-btn.t-search {
+  background: none; border: 0; box-shadow: none; border-radius: 0;
+  width: 44px; height: 60px; flex: 0 0 44px; font-size: 26px; color: var(--text2);
+}
+.narrow .t-controls .t-btn.t-search:not(:disabled):hover { color: var(--blue); }
