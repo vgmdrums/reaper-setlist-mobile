@@ -1592,7 +1592,10 @@ function MobileStageView({
       // The song you're on goes to the TOP of the list (so it reads: this one, then what's next).
       const list = stageListRef.current;
       const row = list?.querySelector(`[data-row-id="${id}"]`);
-      if (list && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      // A song inside a section sits just BELOW the section's header, which sticks to the top of the list —
+      // otherwise the header would cover the song.
+      const hdr = row?.parentElement?.querySelector(":scope > .mstage-sec-hdr");
+      if (list && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - (hdr ? hdr.offsetHeight : 0);
     }, 60);
     return () => clearTimeout(t);
   }
