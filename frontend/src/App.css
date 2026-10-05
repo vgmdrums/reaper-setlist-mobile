@@ -2139,11 +2139,61 @@ button:not(:disabled):active {
 
 /* ══ Phone: round transport buttons; Search is just an icon (no circle) ══ */
 .narrow .t-controls .t-center .t-btn:not(.t-search) { border-radius: 50%; flex: 0 0 auto; padding: 0; }
-.narrow .t-controls .t-center .t-btn:not(.t-search):not(.t-play) { width: 60px; height: 60px; min-height: 0; font-size: 22px; }
-.narrow .t-controls .t-mid .t-play { width: 84px; height: 84px; min-height: 0; font-size: 34px; }
+.narrow .t-controls .t-center .t-btn:not(.t-search):not(.t-play) { width: 52px; height: 52px; min-height: 0; font-size: 20px; }
+.narrow .t-controls .t-mid .t-play { width: 72px; height: 72px; min-height: 0; font-size: 30px; }
 .narrow .t-controls .t-btn.t-search,
 .narrow.app .t-controls .t-btn.t-search {
   background: none; border: 0; box-shadow: none; border-radius: 0;
-  width: 44px; height: 60px; flex: 0 0 44px; font-size: 26px; color: var(--text2);
+  width: 40px; height: 52px; flex: 0 0 40px; font-size: 24px; color: var(--text2);
 }
 .narrow .t-controls .t-btn.t-search:not(:disabled):hover { color: var(--blue); }
+
+/* ══ Landscape phone (short screen): a compact transport that fits the height — whatever the width.
+   Tablets are taller than 520 px even in landscape, so they keep their big controls. ══ */
+@media (max-height: 520px) {
+  .app.app.app .transport-bar { height: auto; min-height: 0; padding: 6px 14px; gap: 6px; display: grid;
+    grid-template-columns: 1fr; grid-template-areas: "center"; }
+  .app.app.app .transport-bar .t-controls { grid-column: 1; grid-row: 1; grid-area: center; width: 100%; align-items: center; }
+  .app.app.app .transport-bar .t-left, .app.app.app .transport-bar .t-right { display: none; }
+  .app.app.app .t-controls .t-center { gap: 12px; }
+  .app.app.app .t-controls .t-center .t-btn:not(.t-search):not(.t-play) {
+    width: 46px; height: 46px; min-height: 0; flex: 0 0 auto; font-size: 18px; border-radius: 50%; padding: 0; }
+  .app.app.app .t-controls .t-center.t-mid .t-play {
+    width: 58px; height: 58px; min-height: 0; flex: 0 0 auto; font-size: 22px; border-radius: 50%; padding: 0; }
+  .app.app.app .t-controls .t-btn.t-search { width: 40px; height: 46px; flex: 0 0 40px; font-size: 22px;
+    background: none; border: 0; box-shadow: none; border-radius: 0; color: var(--text2); }
+  .app.app.app .t-controls .t-ph { flex: 0 0 40px; width: 40px; }
+  .app.app.app .mstage-reaper-status { font-size: 10px; padding: 3px 10px; gap: 6px; }
+  .app.app.app .mstage-reaper-dot { width: 7px; height: 7px; }
+  .app.app.app .mstage-bridge-note { font-size: 9px; }
+  .app.app.app .mstage-identity { padding: 3px 14px; }
+  .app.app.app .mstage-identity-text { font-size: 10px; letter-spacing: .02em; }
+  .app.app.app .mstage-settings-btn { font-size: 18px; padding: 2px 8px; }
+  .app.app.app .mstage-sel { min-height: 0; padding: 3px 14px 4px; }
+  .app.app.app .mstage-sel-name { font-size: calc(24px * var(--list-zoom)); }
+  .app.app.app .mstage-sel-sheets { margin-top: 2px; }
+  .app.app.app .mstage-sheet-btn { padding: 3px 10px; min-height: 26px; font-size: 11px; }
+  .app.app.app .mstage-up { min-height: 0; padding: 3px 14px; }
+  .app.app.app .mstage-up-lbl { font-size: 10px; }
+  .app.app.app .mstage-up-name { font-size: calc(15px * var(--list-zoom)); }
+}
+
+/* ══ Phone: smaller transport, Now Playing and Up Next boxes (portrait) ══ */
+.narrow.app .transport-bar { min-height: 0; padding: 20px 12px 6px; gap: 0; }
+.narrow.app .t-right { top: 4px; }
+.narrow .t-count, .narrow .t-total { font-size: 10px; }
+.narrow .mstage-sel { min-height: 0; padding: 6px 12px 8px; }
+.narrow .mstage-sel-lbl { font-size: 10px; letter-spacing: 2px; }
+.narrow .mstage-sel-name { font-size: calc(28px * var(--list-zoom)); }
+.narrow .mstage-live-dot { width: calc(14px * var(--list-zoom)); height: calc(14px * var(--list-zoom)); }
+.narrow .mstage-sel-sheets { gap: 6px; margin-top: 4px; }
+.narrow .mstage-sheet-btn { padding: 4px 12px; min-height: 30px; font-size: 12px; }
+.narrow .mstage-up { min-height: 0; padding: 5px 12px; gap: 8px; }
+.narrow .mstage-up-lbl { font-size: 10px; }
+.narrow .mstage-up-name { font-size: calc(16px * var(--list-zoom)); }
+
+/* The song name must never be clipped at the top (tall letters were cut off): more line height and room above it;
+   a long section name in the label stays on one line instead of pushing things around. */
+.mstage-sel-name { line-height: 1.25; padding-top: 6px; padding-bottom: 2px; }
+.mstage-sel-lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 2px; }
+.mstage-sel { justify-content: flex-start; }
