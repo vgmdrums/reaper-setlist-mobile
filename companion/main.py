@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pairing
 import sheets
@@ -28,12 +28,12 @@ import sheets
 # Overridable so a second copy can run alongside one that's already holding
 # 9760 (a dev instance, or testing a new build) without a port clash.
 PORT = int(os.environ.get("GENIUS_SETLIST_PORT") or 9760)
-APP_VERSION = "1.0.46"
+APP_VERSION = "1.0.47"
 UPDATE_REPO = "vgmdrums/reaper-setlist-mobile"
 # The genius_bridge.lua in this build reports itself as this version (bridge_version in
 # genius_state.json). REAPER keeps running whatever copy of the script it loaded, so after
 # an update the bridge has to be restarted in REAPER — the page says so while it reports less.
-BRIDGE_VERSION = 10
+BRIDGE_VERSION = 11
 
 # ── Bridge file paths ─────────────────────────────────────────────────────────
 def get_reaper_resource_path() -> str:
@@ -132,7 +132,7 @@ def bridge_connected() -> bool:
         return False
 
 def send_command(action: int = 0, pos: float = None, loop_pos: float = None, quantize: bool = False) -> bool:
-    cmd = {"id": str(uuid.uuid4())}
+    cmd = {"id": str(uuid.uuid4()), "ts": int(time.time())}   # ts: the bridge ignores a command that sat unread for seconds
     if action:
         cmd["action"] = action
     if pos is not None:
@@ -242,10 +242,33 @@ async def require_admin(x_device_id: Optional[str] = Header(None, alias="X-Devic
     if x_device_id not in pairing.get_admin_device_ids():
         raise HTTPException(403, "Only an admin device can edit setlists")
 
-async def require_transport_control(x_device_id: Optional[str] = Header(None, alias="X-Device-Id")):
+# Each open WebSocket is a "session". A transport command carries its session id and how long the session had been
+# open (on the phone's clock) when it was sent. A command from a session that has since ended (the phone dropped off
+# Wi-Fi and its request was held up on the way), or one that took more than a few seconds to arrive, is refused —
+# so nothing a disconnected device did gets replayed all at once when it reconnects.
+_ws_sessions: Dict[str, dict] = {}      # session id -> {"t0": monotonic start, "device": device id}
+STALE_COMMAND_SECONDS = 4.0
+
+def _command_is_stale(session: Optional[str], age_ms: Optional[str]) -> bool:
+    if not session:
+        return False                      # an older app that doesn't send a session: accept as before
+    info = _ws_sessions.get(session)
+    if info is None:
+        return True                       # that connection has ended
+    try:
+        sent_after = float(age_ms) / 1000.0
+    except (TypeError, ValueError):
+        return False
+    return (time.monotonic() - info["t0"]) - sent_after > STALE_COMMAND_SECONDS
+
+async def require_transport_control(x_device_id: Optional[str] = Header(None, alias="X-Device-Id"),
+                                    x_session: Optional[str] = Header(None, alias="X-Session"),
+                                    x_session_age: Optional[str] = Header(None, alias="X-Session-Age")):
     """Guards play/stop/seek/etc. A device can be locked to view-only in
     Stage view (tray: uncheck 'Play/Stop') independently of admin status —
     admins are always exempt from this specific restriction."""
+    if _command_is_stale(x_session, x_session_age):
+        raise HTTPException(409, "Stale command from a disconnected session — ignored")
     if not pairing.can_control_playback(x_device_id):
         raise HTTPException(403, "This device doesn't have playback control")
 
@@ -644,6 +667,10 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device:
     pairing.record_device(device_id, device or "")
 
     await manager.connect(websocket, label=device or "phone", device_id=device_id)
+    session_id = uuid.uuid4().hex
+    for old_sid in [k for k, v in _ws_sessions.items() if device_id and v["device"] == device_id]:
+        _ws_sessions.pop(old_sid, None)   # this device reconnected: anything still on its way from the old connection is void
+    _ws_sessions[session_id] = {"t0": time.monotonic(), "device": device_id}
     loop = asyncio.get_event_loop()
     last_connected = None
     last_region_sig = None
@@ -653,7 +680,7 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device:
     try:
         ok = bridge_connected()
         last_connected = ok
-        await websocket.send_json({"type": "connected", "reaper_connected": ok, "interface": "lua-bridge"})
+        await websocket.send_json({"type": "connected", "reaper_connected": ok, "interface": "lua-bridge", "session": session_id})
         _is_admin = bool(device_id) and device_id in pairing.get_admin_device_ids()
         await websocket.send_json({"type": "role", "isAdmin": _is_admin,
                                    "canControl": _is_admin or (bool(device_id) and pairing.can_control_playback(device_id))})
@@ -716,6 +743,8 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None, device:
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+    finally:
+        _ws_sessions.pop(session_id, None)   # commands still in flight from this connection are now void
 
 app.include_router(api)
 

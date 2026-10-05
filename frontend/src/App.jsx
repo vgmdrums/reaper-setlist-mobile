@@ -85,9 +85,22 @@ function getDeviceLabel() {
 // path — rather than threading the Authorization header through every call
 // site, attach it once here so existing fetch(...) calls need no changes.
 const _rawFetch = window.fetch.bind(window);
+// The live WebSocket session (set when the companion says hello, cleared when the socket closes). Play/stop/seek
+// need one: while disconnected they're dropped on the spot — not held up in the network to fire all at once when the
+// connection comes back — and each one is stamped so the companion can refuse it if it nevertheless arrives late.
+const LIVE = { sid: null, at: 0 };
+const TRANSPORT_PATH = /^\/(play|pause|stop|seek|play-selected|loop-seek|midi\/send-cc|midi-reset)(\?|$)/;
 window.fetch = (input, init = {}) => {
   const headers = { ...(init.headers || {}), "X-Device-Id": DEVICE_ID };
   if (PAIR_TOKEN) headers["Authorization"] = `Bearer ${PAIR_TOKEN}`;
+  if (typeof input === "string" && TRANSPORT_PATH.test(input)) {
+    if (!LIVE.sid) {
+      return Promise.resolve(new Response(JSON.stringify({ detail: "Not connected — ignored" }),
+        { status: 409, headers: { "Content-Type": "application/json" } }));
+    }
+    headers["X-Session"] = LIVE.sid;
+    headers["X-Session-Age"] = String(Math.round(performance.now() - LIVE.at));
+  }
   return _rawFetch(input, { ...init, headers });
 };
 
@@ -2136,6 +2149,7 @@ export default function App() {
       fetch(`${API}/version`).then(r => r.json()).then(d => setCompanionVersion(d.version || "")).catch(() => {});
     };
     ws.onclose = () => {
+      LIVE.sid = null;
       setWsConnected(false);
       reaperDownSinceRef.current = 0; bridgeOutdatedSinceRef.current = 0;
       setReaperConnected(false);
@@ -2145,6 +2159,7 @@ export default function App() {
     };
     ws.onmessage = e => {
       const m = JSON.parse(e.data);
+      if (m.type === "connected" && m.session) { LIVE.sid = m.session; LIVE.at = performance.now(); }
       if (m.reaper_connected !== undefined) {
         if (m.reaper_connected) { reaperDownSinceRef.current = 0; setReaperConnected(true); }
         else {

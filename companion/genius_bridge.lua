@@ -1,4 +1,4 @@
--- Genius SetList Bridge Script v10 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position; updates itself; instance id)
+-- Genius SetList Bridge Script v11 (song changes land on the next quarter note, without a MIDI flam; timing diagnostics; tempo + beat position; updates itself; instance id)
 -- Actions > Load ReaScript > genius_bridge.lua > Run
 -- Optional: Actions > Add to startup actions
 
@@ -180,7 +180,7 @@ local function collect_state()
     proj_name = proj_path:match("([^/\\]+)%.rpp$") or ""
   end
   return string.format(
-    '{"bridge_version":10,"instance":"%s","is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
+    '{"bridge_version":11,"instance":"%s","is_playing":%s,"is_paused":%s,"position":%.4f,"proj_path":"%s","proj_name":"%s","regions":%s,"tracks":%s,"peaks":%s,"midi_devices":%s,"jump_diag":%s,"tick_gap_ms":%.1f,"qn":%.4f,"bpm":%.2f}',
     INSTANCE,
     (play==1) and "true" or "false",
     (play==2) and "true" or "false",
@@ -285,6 +285,11 @@ local function process_command()
   local cmd_id = raw:match('"id":"([^"]+)"')
   if not cmd_id or cmd_id == last_cmd_id then return end
   last_cmd_id = cmd_id
+
+  -- A command that sat in the file for a few seconds (REAPER or this script wasn't running when it was written) is
+  -- stale: don't act on it now, so nothing queued while disconnected fires all at once on reconnect.
+  local ts = tonumber(raw:match('"ts":(%d+)'))
+  if ts and math.abs(os.time() - ts) > 5 then write_file(CMD_FILE, ""); return end
 
   -- Quit command: stops the defer loop so Reaper releases the script file
   if raw:match('"quit":true') then
