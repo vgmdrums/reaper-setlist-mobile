@@ -1608,7 +1608,13 @@ function MobileStageView({
       // A song inside a section sits just BELOW the section's header, which sticks to the top of the list —
       // otherwise the header would cover the song.
       const hdr = row?.parentElement?.querySelector(":scope > .mstage-sec-hdr");
-      if (list && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - (hdr ? hdr.offsetHeight : 0);
+      // glide there rather than jump (the very first reveal, when the page opens, jumps)
+      if (list && row) {
+        const top = list.scrollTop + row.getBoundingClientRect().top - list.getBoundingClientRect().top - (hdr ? hdr.offsetHeight : 0);
+        if (list.scrollTo && list.dataset.revealed) list.scrollTo({ top, behavior: "smooth" });
+        else list.scrollTop = top;
+        list.dataset.revealed = "1";
+      }
     }, 60);
     return () => clearTimeout(t);
   }
