@@ -1137,6 +1137,46 @@ function loadListZoom() {
     return Number.isFinite(n) && n >= LIST_ZOOM_MIN && n <= LIST_ZOOM_MAX ? n : 100;
   } catch { return 100; }
 }
+// ── Pads: the Pick A Cover "SELECT SONG" keys can be laid out like whatever sample pad you play (3x3, 4x4 ...) ──
+// The layout in use and the layouts you saved live on this device (a tablet and a phone can differ).
+const PAD_LAYOUT_KEY = "padLayout", PAD_SAVED_KEY = "padLayouts";
+const PAD_DEFAULT = { cols: 1, rows: 0, size: 68, square: false, gap: 8, order: "top" };   // rows 0 = as many as needed
+const PAD_PRESETS = [
+  { name: "List",            cols: 1, rows: 0, size: 68,  square: false, gap: 8,  order: "top" },
+  { name: "2×2",             cols: 2, rows: 2, size: 120, square: true,  gap: 10, order: "top" },
+  { name: "3×3 (SPD-SX)",    cols: 3, rows: 3, size: 100, square: true,  gap: 10, order: "top" },
+  { name: "4×4 (MPC / MPD)", cols: 4, rows: 4, size: 78,  square: true,  gap: 8,  order: "bottom" },
+  { name: "4×2",             cols: 4, rows: 2, size: 78,  square: true,  gap: 8,  order: "top" },
+];
+const clampN = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+function cleanPad(l) {
+  const o = l || {};
+  return { cols: clampN(o.cols, 1, 8, 1), rows: clampN(o.rows, 0, 8, 0), size: clampN(o.size, 40, 240, 68),
+           square: !!o.square, gap: clampN(o.gap, 0, 28, 8), order: o.order === "bottom" ? "bottom" : "top" };
+}
+function loadPadLayout() {
+  try { return cleanPad(JSON.parse(localStorage.getItem(PAD_LAYOUT_KEY) || "null") || PAD_DEFAULT); } catch { return { ...PAD_DEFAULT }; }
+}
+function loadSavedPads() {
+  try {
+    const a = JSON.parse(localStorage.getItem(PAD_SAVED_KEY) || "[]");
+    return Array.isArray(a) ? a.filter(x => x && x.name).map(x => ({ id: x.id || x.name, name: String(x.name), ...cleanPad(x) })) : [];
+  } catch { return []; }
+}
+// Which song sits in which slot of the pad grid (null = an empty pad). Pads number from the top-left, or from the
+// bottom-left the way most sample pads do (pad 1 is the bottom-left one).
+function padSlots(count, l) {
+  const cols = Math.max(1, l.cols);
+  const rows = Math.max(l.rows > 0 ? l.rows : 1, Math.ceil(count / cols) || 1);
+  const slots = [];
+  for (let r = 0; r < rows; r++) {
+    const rr = l.order === "bottom" ? rows - 1 - r : r;
+    for (let c = 0; c < cols; c++) { const i = rr * cols + c; slots.push(i < count ? i : null); }
+  }
+  return { cols, rows, slots };
+}
+const padStyle = l => ({ "--pad-cols": Math.max(1, l.cols), "--pad-size": `${l.size}px`, "--pad-gap": `${l.gap}px` });
+
 const SHEET_PREFS_EVENT = "sheetprefs-changed";   // tells the App when the master switch moves
 const NO_SHEETS = [];
 // Types the Settings checkboxes always offer; any other type found in the
@@ -1317,6 +1357,27 @@ function useDeviceSettings(sheets) {
   const [hotkeys, setHotkeys] = useState(loadHotkeys);
   const [listeningFor, setListeningFor] = useState(null);
   const [fullscreen, setFullscreenOn] = useState(false);
+  const [padLayout, setPadLayoutState] = useState(loadPadLayout);
+  const [savedPads, setSavedPads] = useState(loadSavedPads);
+
+  function setPadLayout(patch) {
+    const next = cleanPad({ ...padLayout, ...patch });
+    setPadLayoutState(next);
+    try { localStorage.setItem(PAD_LAYOUT_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked — still works this session */ }
+  }
+  function savePad(name) {
+    const nm = (name || "").trim();
+    if (!nm) return;
+    const entry = { id: nm.toLowerCase(), name: nm, ...padLayout };
+    const next = [...savedPads.filter(p => p.id !== entry.id), entry];
+    setSavedPads(next);
+    try { localStorage.setItem(PAD_SAVED_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+  }
+  function deletePad(id) {
+    const next = savedPads.filter(p => p.id !== id);
+    setSavedPads(next);
+    try { localStorage.setItem(PAD_SAVED_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+  }
 
   function setListZoom(n) {
     setListZoomState(n);
@@ -1390,13 +1451,18 @@ function useDeviceSettings(sheets) {
   useBackClose(showSettings, closeSettings);
 
   return { sheetPrefs, updateSheetPrefs, listZoom, setListZoom, hotkeys, listeningFor, setListeningFor, showSettings, setShowSettings,
-           closeSettings, typeOptions, canFullscreen, fullscreen, toggleFullscreen, clearHotkey };
+           closeSettings, typeOptions, canFullscreen, fullscreen, toggleFullscreen, clearHotkey,
+           padLayout, setPadLayout, savedPads, savePad, deletePad };
 }
 
 function DeviceSettings({ ds, canControl }) {
   const { showSettings, closeSettings, sheetPrefs, updateSheetPrefs, listZoom, setListZoom, hotkeys, listeningFor, setListeningFor,
-          typeOptions: sheetTypeOptions, canFullscreen, fullscreen, toggleFullscreen, clearHotkey } = ds;
+          typeOptions: sheetTypeOptions, canFullscreen, fullscreen, toggleFullscreen, clearHotkey,
+          padLayout, setPadLayout, savedPads, savePad, deletePad } = ds;
+  const [padName, setPadName] = useState("");
   if (!showSettings) return null;
+  const sameLayout = p => ["cols", "rows", "size", "square", "gap", "order"].every(k => p[k] === padLayout[k]);
+  const preview = padSlots(Math.max(padLayout.cols * Math.max(padLayout.rows, 1), 1), padLayout);
   return (
         <div className="overlay settings-overlay">
           <div className="new-sl-modal settings-screen">
@@ -1423,6 +1489,77 @@ function DeviceSettings({ ds, canControl }) {
               </label>
               <p className="sd-hint">Hides the status bar and the navigation / task bar. Swipe in from the screen edge to bring them back for a moment — the Back gesture (from the left or right edge) works straight away.</p>
               </>)}
+              <div className="settings-section-title">PADS</div>
+              <p className="sd-hint">
+                Shapes the Pick A Cover song keys like the sample pad you play, so the keys on screen sit where the pads under your
+                hands do. Saved on this device.
+              </p>
+              <div className="pad-chips">
+                {PAD_PRESETS.map(p => (
+                  <button key={p.name} className={`pad-chip${sameLayout(p) ? " on" : ""}`} onClick={() => setPadLayout(p)}>{p.name}</button>
+                ))}
+              </div>
+              {savedPads.length > 0 && (<>
+                <div className="settings-subtitle">Your saved layouts</div>
+                <div className="pad-chips">
+                  {savedPads.map(p => (
+                    <span key={p.id} className={`pad-chip saved${sameLayout(p) ? " on" : ""}`}>
+                      <button onClick={() => setPadLayout(p)}>{p.name}</button>
+                      <button className="pad-chip-x" onClick={() => deletePad(p.id)} aria-label={`Delete ${p.name}`}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              </>)}
+              <div className="pad-preview-wrap">
+                <div className={`mstage-pac-keys pad-preview${padLayout.square ? " sq" : ""}`} style={padStyle(padLayout)}>
+                  {preview.slots.map((li, k) => (
+                    <div key={k} className="mstage-pac-key"><span className="mstage-pac-num">{li == null ? "" : li + 1}</span></div>
+                  ))}
+                </div>
+              </div>
+              <div className="settings-zoom">
+                <span>Columns</span>
+                <input type="range" min="1" max="8" step="1" value={padLayout.cols}
+                  onChange={e => setPadLayout({ cols: Number(e.target.value) })} aria-label="Pad columns" />
+                <span className="settings-zoom-val">{padLayout.cols}</span>
+              </div>
+              <div className="settings-zoom">
+                <span>Rows</span>
+                <input type="range" min="0" max="8" step="1" value={padLayout.rows}
+                  onChange={e => setPadLayout({ rows: Number(e.target.value) })} aria-label="Pad rows" />
+                <span className="settings-zoom-val">{padLayout.rows === 0 ? "Auto" : padLayout.rows}</span>
+              </div>
+              <div className="settings-zoom">
+                <span>Pad size</span>
+                <input type="range" min="40" max="240" step="2" value={padLayout.size}
+                  onChange={e => setPadLayout({ size: Number(e.target.value) })} aria-label="Pad size" />
+                <span className="settings-zoom-val">{padLayout.size}</span>
+              </div>
+              <div className="settings-zoom">
+                <span>Gap</span>
+                <input type="range" min="0" max="28" step="1" value={padLayout.gap}
+                  onChange={e => setPadLayout({ gap: Number(e.target.value) })} aria-label="Pad gap" />
+                <span className="settings-zoom-val">{padLayout.gap}</span>
+              </div>
+              <label className="settings-check">
+                <input type="checkbox" checked={padLayout.square} onChange={e => setPadLayout({ square: e.target.checked })} />
+                <span>Square pads</span>
+              </label>
+              <label className="settings-check">
+                <input type="checkbox" checked={padLayout.order === "bottom"}
+                  onChange={e => setPadLayout({ order: e.target.checked ? "bottom" : "top" })} />
+                <span>Number from the bottom-left</span>
+              </label>
+              <p className="sd-hint">
+                Most sample pads number pad 1 at the bottom-left. Rows set to Auto grows as the folder needs; set a row count to show
+                empty pads where the song list runs out, so the grid matches the hardware.
+              </p>
+              <div className="pad-save">
+                <input type="text" value={padName} maxLength={30} placeholder="Name this layout (e.g. SPD-SX)"
+                  onChange={e => setPadName(e.target.value)} />
+                <button className="modal-confirm" disabled={!padName.trim()}
+                  onClick={() => { savePad(padName); setPadName(""); }}>SAVE LAYOUT</button>
+              </div>
               <div className="settings-section-title">SHEET MUSIC</div>
               <label className="settings-check">
                 <input type="checkbox" checked={sheetPrefs.enabled} onChange={e => updateSheetPrefs({ enabled: e.target.checked })} />
@@ -1523,7 +1660,7 @@ function MobileStageView({
   const [viewing, setViewing] = useState(null);   // { song, file } while the chart viewer is open
   // Device settings (sheet music, text size, hotkeys) live in the App: the Settings screen and the bottom
   // status area are shared with Edit mode.
-  const { sheetPrefs, updateSheetPrefs, listZoom, hotkeys, listeningFor } = settings;
+  const { sheetPrefs, updateSheetPrefs, listZoom, hotkeys, listeningFor, padLayout } = settings;
   // "Enable sheet music" off: no sheets exist as far as everything below is concerned.
   const sheets = sheetPrefs.enabled ? allSheets : NO_SHEETS;
   // Every chart of a song: the PDFs named "{region} - {type}.pdf" for its region
@@ -1856,23 +1993,29 @@ function MobileStageView({
       )}
       </div>
 
-      {showPacPanel && (
-        <div className="mstage-pac">
-          <div className="mstage-pac-hdr">⌨ SELECT SONG</div>
-          <div className="mstage-pac-keys">
-            {(currentPlayingParent.children || []).map((leaf, li) => {
-              const lr = getLiveItem(leaf);
-              return (
-                <button key={leaf.id} className="mstage-pac-key"
-                  onClick={() => playItem(currentPlayingParent, currentIndex, li)}>
-                  <span className="mstage-pac-num">{li + 1}</span>
-                  <span className="mstage-pac-name">{lr.name}</span>
-                </button>
-              );
-            })}
+      {showPacPanel && (() => {
+        const leaves = currentPlayingParent.children || [];
+        const { slots } = padSlots(leaves.length, padLayout);
+        return (
+          <div className="mstage-pac">
+            <div className="mstage-pac-hdr">⌨ SELECT SONG</div>
+            <div className={`mstage-pac-keys${padLayout.square ? " sq" : ""}`} style={padStyle(padLayout)}>
+              {slots.map((li, k) => {
+                if (li == null) return <div key={`empty${k}`} className="mstage-pac-key empty" aria-hidden="true" />;
+                const leaf = leaves[li];
+                const lr = getLiveItem(leaf);
+                return (
+                  <button key={leaf.id} className="mstage-pac-key"
+                    onClick={() => playItem(currentPlayingParent, currentIndex, li)}>
+                    <span className="mstage-pac-num">{li + 1}</span>
+                    <span className="mstage-pac-name">{lr.name}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {selName && (
         <div className="mstage-sel">

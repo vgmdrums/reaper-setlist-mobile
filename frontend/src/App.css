@@ -2197,3 +2197,36 @@ button:not(:disabled):active {
 .mstage-sel-name { line-height: 1.25; padding-top: 6px; padding-bottom: 2px; }
 .mstage-sel-lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 2px; }
 .mstage-sel { justify-content: flex-start; }
+
+/* ══ Pads: the Pick A Cover keys as a grid (columns, size, gap and square-ness come from Settings → Pads) ══ */
+.mstage-pac-keys { display: grid; grid-template-columns: repeat(var(--pad-cols, 1), minmax(0, 1fr)); gap: var(--pad-gap, 8px); }
+.mstage-pac-keys.sq { grid-template-columns: repeat(var(--pad-cols, 1), minmax(0, var(--pad-size, 68px))); justify-content: center; }
+.mstage-pac-keys .mstage-pac-key { min-height: var(--pad-size, 68px); padding: 6px; min-width: 0; }
+.mstage-pac-keys.sq .mstage-pac-key { aspect-ratio: 1 / 1; min-height: 0; overflow: hidden; }
+.mstage-pac-keys:not(.sq) .mstage-pac-name { font-size: 20px; }
+.mstage-pac-keys.sq .mstage-pac-name {
+  font-size: clamp(11px, calc(var(--pad-size, 68px) * .2), 22px); line-height: 1.15;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mstage-pac-key.empty { opacity: .25; border-style: dashed; background: none; cursor: default; }
+.mstage-pac-key.empty:active { filter: none; transform: none; }
+
+/* Settings → Pads */
+.pad-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.pad-chip {
+  display: inline-flex; align-items: center; border: 1px solid var(--border2); border-radius: 16px; background: var(--bg3);
+  color: var(--text); font-size: 14px; min-height: 36px; overflow: hidden;
+}
+.pad-chip > button { background: none; border: 0; color: inherit; font: inherit; padding: 6px 14px; min-height: 36px; cursor: pointer; }
+button.pad-chip { padding: 6px 14px; cursor: pointer; font-family: inherit; }
+.pad-chip.on { border-color: var(--green); color: var(--green); background: rgba(46,204,113,.12); }
+.pad-chip .pad-chip-x { padding: 6px 10px 6px 4px; color: var(--text2); }
+.pad-preview-wrap { padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.pad-preview .mstage-pac-key { pointer-events: none; }
+.pad-preview.sq { --pad-size: 44px !important; }
+.pad-preview:not(.sq) .mstage-pac-key { min-height: 36px; }
+.pad-save { display: flex; gap: 8px; align-items: center; }
+.pad-save input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--border2); border-radius: 4px; background: var(--bg3); color: var(--text); font-size: 16px; }
+.pad-save .modal-confirm:disabled { opacity: .4; }
+.pad-preview-wrap, .pad-chips, .pad-save, .settings-zoom { flex-shrink: 0; }
+.pad-preview-wrap { max-height: none; }
