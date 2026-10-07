@@ -1269,7 +1269,7 @@ function SheetViewer({ song, sheets, activeFile, onClose, autoScroll, invert, on
   // A different song (or sheet) always opens at the top, at the left edge, with auto-scroll's
   // hands-off timer cleared — whatever the previous chart was scrolled to.
   const openedRef = useRef(false);
-  useEffect(() => {
+  React.useLayoutEffect(() => {      // before the screen is painted: the new song is never seen at the old song's scroll position
     if (!openedRef.current) { openedRef.current = true; return; }   // a freshly opened chart is already at the top (or placed by auto-scroll)
     handsOffUntil.current = 0;
     const el = bodyRef.current;
@@ -1765,9 +1765,15 @@ function MobileStageView({
   // Auto-scroll only follows the song that's actually playing (viewing another
   // song's chart while one plays leaves it alone).
   const liveSong = playingLeaf ? getLiveItem(playingLeaf) : null;
+  // How far into the song REAPER really is. Right after a song change the position still belongs to the
+  // PREVIOUS song for a moment (the jump waits for the beat, and the page hears about it a little later) — that
+  // must not scroll the new chart: it would flash partway down (or to the bottom) and then snap back to the top.
+  // Until REAPER is inside this song, the chart sits at the top.
+  const songPosition = liveSong && position >= liveSong.start - 0.05 && position <= liveSong.end + 2
+    ? position - liveSong.start : 0;
   const autoScroll = (showViewer && sheetPrefs.scroll && isPlaying && liveSong && viewing.song === playingName
     && (liveSong.end - liveSong.start) > 0)
-    ? { elapsed: position - liveSong.start, duration: liveSong.end - liveSong.start, wait: sheetPrefs.scrollWait }
+    ? { elapsed: songPosition, duration: liveSong.end - liveSong.start, wait: sheetPrefs.scrollWait }
     : null;
 
   // Fires bound actions on keydown. Disabled while capturing a new binding
